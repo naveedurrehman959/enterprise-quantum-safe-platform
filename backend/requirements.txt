@@ -13,3 +13,4 @@ prometheus-client
 psycopg2-binary
 reportlab
 pandas
+pytest
