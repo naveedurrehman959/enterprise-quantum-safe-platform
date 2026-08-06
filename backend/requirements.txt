@@ -1,0 +1,15 @@
+Flask
+python-dotenv
+Flask-Cors
+Flask-JWT-Extended
+Flask-SQLAlchemy
+Flask-Migrate
+Flask-Marshmallow
+Flask-Limiter
+marshmallow-sqlalchemy
+gunicorn
+psutil
+prometheus-client
+psycopg2-binary
+reportlab
+pandas

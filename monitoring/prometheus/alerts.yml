@@ -1,0 +1,56 @@
+groups:
+
+- name: quantum-safe-alerts
+
+  rules:
+
+  - alert: LowQuantumReadiness
+
+    expr: quantum_readiness_score < 70
+
+    for: 1m
+
+    labels:
+      severity: warning
+
+    annotations:
+      summary: Low quantum readiness score
+
+
+  - alert: VulnerableAlgorithmsDetected
+
+    expr: vulnerable_algorithms > 0
+
+    for: 1m
+
+    labels:
+      severity: critical
+
+    annotations:
+      summary: Vulnerable cryptographic algorithms detected
+
+
+  - alert: HighCPUUsage
+
+    expr: cpu_usage_percent > 90
+
+    for: 1m
+
+    labels:
+      severity: critical
+
+    annotations:
+      summary: CPU usage exceeds threshold
+
+
+  - alert: HighMemoryUsage
+
+    expr: memory_usage_percent > 90
+
+    for: 1m
+
+    labels:
+      severity: critical
+
+    annotations:
+      summary: Memory usage exceeds threshold
