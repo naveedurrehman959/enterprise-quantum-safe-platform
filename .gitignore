@@ -8,3 +8,34 @@ frontend/node_modules/
 frontend/dist/
 .vscode/
 .pytest_cache/
+# Python
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.db
+
+# Environment
+.env
+.env.*
+
+# Flask
+instance/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# macOS
+.DS_Store
