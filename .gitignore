@@ -1,41 +1,47 @@
-__pycache__/
-*.pyc
-.env
-instance/
-*.db
-node_modules/
-frontend/node_modules/
-frontend/dist/
-.vscode/
-.pytest_cache/
+# =========================
 # Python
+# =========================
 __pycache__/
 *.py[cod]
-*.sqlite3
-*.db
-
-# Environment
-.env
-.env.*
-
-# Flask
-instance/
+*.log
 
 # Virtual environments
 venv/
 .venv/
 env/
 
-# Node
+# =========================
+# Environment files
+# =========================
+.env
+.env.*
+
+# =========================
+# Flask
+# =========================
+instance/
+backend/instance/
+
+# =========================
+# Databases
+# =========================
+*.db
+*.sqlite3
+
+# =========================
+# Node.js
+# =========================
+node_modules/
 frontend/node_modules/
 frontend/dist/
 
-# IDE
+# =========================
+# IDEs
+# =========================
 .vscode/
 .idea/
 
-# Logs
-*.log
-
-# macOS
+# =========================
+# OS files
+# =========================
 .DS_Store
