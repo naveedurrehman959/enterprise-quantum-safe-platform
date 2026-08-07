@@ -5,11 +5,20 @@ from .models import AlgorithmAsset
 
 
 class AlgorithmInventoryService:
+    """
+    Enterprise Algorithm Inventory Service
+
+    Responsibilities:
+    - Analyze algorithms
+    - Create algorithms
+    - Prevent duplicates
+    - Auto-register discovered algorithms
+    - Deployment mode management
+    """
 
     @staticmethod
     def analyze_algorithm(name):
-
-        algorithm = name.upper()
+        algorithm = name.upper().strip()
 
         result = {
             "category": "UNKNOWN",
@@ -129,14 +138,34 @@ class AlgorithmInventoryService:
 
     @staticmethod
     def create_algorithm(data):
+        """
+        Create a new algorithm if it does not already exist.
+        """
+
+        algorithm_name = data["algorithm_name"].upper().strip()
+
+        existing = AlgorithmAsset.query.filter_by(
+            algorithm_name=algorithm_name
+        ).first()
+
+        if existing:
+
+            if (
+                data.get("key_size")
+                and not existing.key_size
+            ):
+                existing.key_size = data["key_size"]
+                db.session.commit()
+
+            return existing.to_dict()
 
         analysis = AlgorithmInventoryService.analyze_algorithm(
-            data["algorithm_name"]
+            algorithm_name
         )
 
         algorithm = AlgorithmAsset(
 
-            algorithm_name=data["algorithm_name"],
+            algorithm_name=algorithm_name,
 
             category=analysis["category"],
 
@@ -162,6 +191,36 @@ class AlgorithmInventoryService:
         db.session.commit()
 
         return algorithm.to_dict()
+
+    @staticmethod
+    def auto_register_algorithm(
+        algorithm_name,
+        key_size=None
+    ):
+        """
+        Automatically register an algorithm discovered during
+        Asset Discovery.
+        """
+
+        return AlgorithmInventoryService.create_algorithm({
+
+            "algorithm_name": algorithm_name,
+
+            "key_size": key_size,
+
+            "version": "Discovered"
+
+        })
+
+    @staticmethod
+    def get_algorithm_by_name(name):
+        """
+        Return an algorithm by name.
+        """
+
+        return AlgorithmAsset.query.filter_by(
+            algorithm_name=name.upper().strip()
+        ).first()
 
     @staticmethod
     def set_allowed(algorithm_id, allowed):

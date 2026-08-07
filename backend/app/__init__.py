@@ -75,6 +75,15 @@ def create_app():
     from app.reports.routes import reports_bp
 
     app.register_blueprint(reports_bp)
+
+
+
+
+    from app.asset_discovery.routes import discovery_bp
+
+    app.register_blueprint(discovery_bp,
+    url_prefix="/api/v1/discovery"
+    )
         # ---------------------------------
     # Register Notifications Blueprint
     # ---------------------------------

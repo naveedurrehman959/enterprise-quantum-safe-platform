@@ -6,3 +6,4 @@ from .audit_logs import AuditLog
 from .compliance import Compliance
 from .token_blocklist import TokenBlocklist
 from .certificate import Certificate
+from app.asset_discovery.models import DiscoveredAsset
