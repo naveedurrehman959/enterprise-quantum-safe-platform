@@ -1,21 +1,13 @@
-# backend/app/policy_engine/routes.py
-from app.algorithm_inventory.services import (
-    AlgorithmInventoryService
-)
 from flask import Blueprint, request, jsonify
-
-from .services import PolicyEngineService
-
-from app.risk_assessment.services import (
-    RiskAssessmentService
-)
-
-from app.audit.services import create_audit_log
 
 from flask_jwt_extended import (
     jwt_required,
     get_jwt_identity
 )
+
+from app.audit.services import create_audit_log
+
+from .services import PolicyEngineService
 
 
 policy_bp = Blueprint(
@@ -25,52 +17,25 @@ policy_bp = Blueprint(
 )
 
 
-# ---------------------------------
-# Policy Status
-# ---------------------------------
+# ==========================================================
+# POLICY STATUS
+# ==========================================================
 
 @policy_bp.route(
     "/status",
     methods=["GET"]
 )
+@jwt_required()
 def policy_status():
 
     return jsonify(
         PolicyEngineService.get_policy()
-    )
-
-# ---------------------------------
-# Enable / Disable Algorithm
-# ---------------------------------
-
-@policy_bp.route(
-    "/algorithm/<int:algorithm_id>",
-    methods=["PUT"]
-)
-@jwt_required()
-def update_algorithm_policy(algorithm_id):
-
-    data = request.get_json()
-
-    result = AlgorithmInventoryService.set_allowed(
-        algorithm_id,
-        data["allowed"]
-    )
-
-    create_audit_log(
-        user_id=get_jwt_identity(),
-        action="POLICY_UPDATED",
-        module="POLICY_ENGINE",
-        status="SUCCESS",
-        description=f"Algorithm {algorithm_id} allowed={data['allowed']}"
-    )
-
-    return jsonify(result)
+    ), 200
 
 
-# ---------------------------------
-# List current policy algorithms
-# ---------------------------------
+# ==========================================================
+# LIST POLICIES
+# ==========================================================
 
 @policy_bp.route(
     "/algorithms",
@@ -81,31 +46,97 @@ def policy_algorithms():
 
     return jsonify({
         "algorithms":
-            AlgorithmInventoryService.list_algorithms()
-    })
-# ---------------------------------
-# Basic Algorithm Policy Check
-# ---------------------------------
+            PolicyEngineService.list_policies()
+    }), 200
+
+
+# ==========================================================
+# UPDATE POLICY
+# ==========================================================
+
+@policy_bp.route(
+    "/algorithm/<string:algorithm_name>",
+    methods=["PUT"]
+)
+@jwt_required()
+def update_algorithm_policy(algorithm_name):
+
+    data = request.get_json() or {}
+
+    try:
+
+        result = PolicyEngineService.update_policy(
+            algorithm_name=algorithm_name,
+            enabled=data.get("enabled"),
+            deployment_mode=data.get(
+                "deployment_mode"
+            ),
+            enforcement_action=data.get(
+                "enforcement_action"
+            )
+        )
+
+        create_audit_log(
+            user_id=get_jwt_identity(),
+            action="POLICY_UPDATED",
+            module="POLICY_ENGINE",
+            status="SUCCESS",
+            description=(
+                f"Policy updated for "
+                f"{algorithm_name}"
+            )
+        )
+
+        return jsonify(result), 200
+
+    except ValueError as error:
+
+        return jsonify({
+            "error": str(error)
+        }), 400
+
+    except Exception as error:
+
+        return jsonify({
+            "error":
+                "Unable to update policy.",
+            "details":
+                str(error)
+        }), 500
+
+
+# ==========================================================
+# BASIC POLICY CHECK
+# ==========================================================
 
 @policy_bp.route(
     "/check",
     methods=["POST"]
 )
+@jwt_required()
 def check_policy():
 
-    data = request.get_json()
+    data = request.get_json() or {}
+
+    algorithm = data.get("algorithm")
+
+    if not algorithm:
+
+        return jsonify({
+            "error":
+                "algorithm is required"
+        }), 400
 
     result = PolicyEngineService.check_algorithm(
-        data["algorithm"]
+        algorithm
     )
 
-    return jsonify(result)
+    return jsonify(result), 200
 
 
-
-# ---------------------------------
-# Risk Based Policy Evaluation
-# ---------------------------------
+# ==========================================================
+# RISK + POLICY EVALUATION
+# ==========================================================
 
 @policy_bp.route(
     "/evaluate-risk",
@@ -114,67 +145,23 @@ def check_policy():
 @jwt_required()
 def evaluate_risk():
 
-    data = request.get_json()
+    data = request.get_json() or {}
 
-    algorithm = data.get(
-        "algorithm"
-    )
+    algorithm = data.get("algorithm")
 
+    if not algorithm:
 
-    user_id = get_jwt_identity()
+        return jsonify({
+            "error":
+                "algorithm is required"
+        }), 400
 
-
-    # Risk Engine Call
-
-    risk = RiskAssessmentService.assess_algorithm(
+    result = PolicyEngineService.evaluate_policy(
         algorithm
     )
 
-
-    # Decision Logic
-
-    if risk["risk_level"] == "CRITICAL":
-
-        decision = {
-            "policy_action": "BLOCK",
-            "allowed": False,
-            "migration_required": True
-        }
-
-
-    elif risk["risk_level"] == "HIGH":
-
-        decision = {
-            "policy_action": "MIGRATE",
-            "allowed": False,
-            "migration_required": True
-        }
-
-
-    elif risk["risk_level"] in [
-        "LOW",
-        "SAFE"
-    ]:
-
-        decision = {
-            "policy_action": "APPROVE",
-            "allowed": True,
-            "migration_required": False
-        }
-
-
-    else:
-
-        decision = {
-            "policy_action": "REVIEW",
-            "allowed": False,
-            "migration_required": True
-        }
-
-
-
     create_audit_log(
-        user_id=user_id,
+        user_id=get_jwt_identity(),
         action="POLICY_RISK_EVALUATION",
         module="POLICY_ENGINE",
         status="SUCCESS",
@@ -184,23 +171,4 @@ def evaluate_risk():
         )
     )
 
-
-    return jsonify({
-
-        "algorithm": algorithm,
-
-        "risk_level":
-            risk["risk_level"],
-
-        "risk_score":
-            risk["risk_score"],
-
-        "quantum_vulnerable":
-            risk["quantum_vulnerable"],
-
-        "recommendation":
-            risk["recommendation"],
-
-        **decision
-
-    }), 200
+    return jsonify(result), 200

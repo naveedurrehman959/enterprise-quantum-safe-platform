@@ -4,35 +4,209 @@ from app.extensions import db
 
 from app.algorithm_inventory.models import AlgorithmAsset
 from app.algorithm_inventory.services import AlgorithmInventoryService
-
 from app.risk_assessment.services import RiskAssessmentService
 
-from app.audit.services import create_audit_log
+from .models import CryptoPolicy
 
 
 class PolicyEngineService:
     """
-    Enterprise Quantum-Safe Policy Engine
+    Enterprise Quantum-Safe Policy Engine.
 
     Responsibilities
     ----------------
-    • Policy Enforcement
-    • Algorithm Approval
-    • Risk-Based Decisions
-    • Asset Discovery Integration
-    • Dashboard Summary
+    - Flexible cryptographic policy configuration
+    - Classical / Hybrid / PQC policy modes
+    - Algorithm allow/block enforcement
+    - Risk-aware decisions
+    - Asset discovery integration
+    - Dashboard summary
     """
 
     # ==========================================================
-    # Enterprise Policy
+    # DEFAULT POLICY
+    # ==========================================================
+
+    DEFAULT_POLICIES = {
+
+        # Classical algorithms
+        "RSA-1024": {
+            "enabled": False,
+            "deployment_mode": "CLASSICAL",
+            "enforcement_action": "BLOCK",
+            "priority": 10
+        },
+
+        "RSA-2048": {
+            "enabled": False,
+            "deployment_mode": "CLASSICAL",
+            "enforcement_action": "BLOCK",
+            "priority": 20
+        },
+
+        "RSA-4096": {
+            "enabled": False,
+            "deployment_mode": "CLASSICAL",
+            "enforcement_action": "BLOCK",
+            "priority": 30
+        },
+
+        "ECDSA": {
+            "enabled": False,
+            "deployment_mode": "CLASSICAL",
+            "enforcement_action": "BLOCK",
+            "priority": 30
+        },
+
+        "ECC": {
+            "enabled": False,
+            "deployment_mode": "CLASSICAL",
+            "enforcement_action": "BLOCK",
+            "priority": 30
+        },
+
+        "ECDHE": {
+            "enabled": False,
+            "deployment_mode": "CLASSICAL",
+            "enforcement_action": "BLOCK",
+            "priority": 30
+        },
+
+        # Hybrid
+        "ECDHE + ML-KEM-768": {
+            "enabled": True,
+            "deployment_mode": "HYBRID",
+            "enforcement_action": "ALLOW",
+            "priority": 1
+        },
+
+        # PQC
+        "ML-KEM-768": {
+            "enabled": True,
+            "deployment_mode": "PURE_PQC",
+            "enforcement_action": "ALLOW",
+            "priority": 1
+        },
+
+        "ML-DSA-65": {
+            "enabled": True,
+            "deployment_mode": "PURE_PQC",
+            "enforcement_action": "ALLOW",
+            "priority": 1
+        },
+
+        "AES-256-GCM": {
+            "enabled": True,
+            "deployment_mode": "PURE_PQC",
+            "enforcement_action": "ALLOW",
+            "priority": 1
+        },
+
+        # Weak algorithms
+        "SHA1": {
+            "enabled": False,
+            "deployment_mode": "CLASSICAL",
+            "enforcement_action": "BLOCK",
+            "priority": 5
+        },
+
+        "DES": {
+            "enabled": False,
+            "deployment_mode": "CLASSICAL",
+            "enforcement_action": "BLOCK",
+            "priority": 5
+        },
+
+        "3DES": {
+            "enabled": False,
+            "deployment_mode": "CLASSICAL",
+            "enforcement_action": "BLOCK",
+            "priority": 5
+        }
+    }
+
+    # ==========================================================
+    # INITIALIZE DEFAULT POLICY
+    # ==========================================================
+
+    @staticmethod
+    def initialize_default_policy():
+
+        for algorithm_name, config in (
+            PolicyEngineService.DEFAULT_POLICIES.items()
+        ):
+
+            policy = CryptoPolicy.query.filter_by(
+                algorithm_name=algorithm_name
+            ).first()
+
+            if policy:
+                continue
+
+            policy = CryptoPolicy(
+                algorithm_name=algorithm_name,
+                enabled=config["enabled"],
+                deployment_mode=config["deployment_mode"],
+                enforcement_action=config["enforcement_action"],
+                priority=config["priority"]
+            )
+
+            db.session.add(policy)
+
+        db.session.commit()
+
+    # ==========================================================
+    # GET POLICY
     # ==========================================================
 
     @staticmethod
     def get_policy():
 
-        algorithms = AlgorithmAsset.query.order_by(
-            AlgorithmAsset.algorithm_name
+        PolicyEngineService.initialize_default_policy()
+
+        policies = CryptoPolicy.query.order_by(
+            CryptoPolicy.priority.asc(),
+            CryptoPolicy.algorithm_name.asc()
         ).all()
+
+        approved = []
+        blocked = []
+        conditional = []
+
+        for policy in policies:
+
+            if (
+                policy.enabled
+                and policy.enforcement_action == "ALLOW"
+            ):
+                approved.append(
+                    policy.algorithm_name
+                )
+
+            elif policy.enforcement_action == "BLOCK":
+                blocked.append(
+                    policy.algorithm_name
+                )
+
+            else:
+                conditional.append(
+                    policy.algorithm_name
+                )
+
+        deployment_modes = {
+            "CLASSICAL": [],
+            "HYBRID": [],
+            "PURE_PQC": []
+        }
+
+        for policy in policies:
+
+            deployment_modes.setdefault(
+                policy.deployment_mode,
+                []
+            ).append(
+                policy.algorithm_name
+            )
 
         return {
 
@@ -42,107 +216,234 @@ class PolicyEngineService:
             "security_level":
                 "HIGH",
 
-            "deployment_mode":
-                algorithms[0].deployment_mode
-                if algorithms
-                else "CLASSICAL",
+            "status":
+                "ACTIVE",
 
-            "approved_algorithms": [
+            "policy_status":
+                "ACTIVE",
 
-                a.algorithm_name
+            "approved_algorithms":
+                approved,
 
-                for a in algorithms
+            "allowed_algorithms":
+                approved,
 
-                if a.allowed
+            "blocked_algorithms":
+                blocked,
 
-            ],
+            "conditional_algorithms":
+                conditional,
 
-            "blocked_algorithms": [
-
-                a.algorithm_name
-
-                for a in algorithms
-
-                if not a.allowed
-
-            ],
-
-            "active_algorithms": [
-
-                a.algorithm_name
-
-                for a in algorithms
-
-                if a.active
-
-            ],
+            "deployment_modes":
+                deployment_modes,
 
             "total_algorithms":
-                len(algorithms),
+                len(policies),
 
             "allowed_count":
-                sum(a.allowed for a in algorithms),
+                len(approved),
 
             "blocked_count":
-                sum(not a.allowed for a in algorithms),
+                len(blocked),
 
-            "active_count":
-                sum(a.active for a in algorithms),
+            "conditional_count":
+                len(conditional),
+
+            "policies": [
+                policy.to_dict()
+                for policy in policies
+            ],
 
             "timestamp":
                 datetime.utcnow().isoformat()
-
         }
 
     # ==========================================================
-    # Policy Evaluation
+    # LIST POLICIES
+    # ==========================================================
+
+    @staticmethod
+    def list_policies():
+
+        PolicyEngineService.initialize_default_policy()
+
+        policies = CryptoPolicy.query.order_by(
+            CryptoPolicy.priority.asc(),
+            CryptoPolicy.algorithm_name.asc()
+        ).all()
+
+        return [
+            policy.to_dict()
+            for policy in policies
+        ]
+
+    # ==========================================================
+    # UPDATE POLICY
+    # ==========================================================
+
+    @staticmethod
+    def update_policy(
+        algorithm_name,
+        enabled=None,
+        deployment_mode=None,
+        enforcement_action=None
+    ):
+
+        algorithm_name = algorithm_name.strip()
+
+        policy = CryptoPolicy.query.filter_by(
+            algorithm_name=algorithm_name
+        ).first()
+
+        if policy is None:
+
+            policy = CryptoPolicy(
+                algorithm_name=algorithm_name
+            )
+
+            db.session.add(policy)
+
+        if enabled is not None:
+            policy.enabled = bool(enabled)
+
+        if deployment_mode:
+
+            deployment_mode = deployment_mode.upper()
+
+            allowed_modes = [
+                "CLASSICAL",
+                "HYBRID",
+                "PURE_PQC"
+            ]
+
+            if deployment_mode not in allowed_modes:
+                raise ValueError(
+                    "Invalid deployment mode. "
+                    "Use CLASSICAL, HYBRID or PURE_PQC."
+                )
+
+            policy.deployment_mode = deployment_mode
+
+        if enforcement_action:
+
+            enforcement_action = (
+                enforcement_action.upper()
+            )
+
+            allowed_actions = [
+                "ALLOW",
+                "BLOCK",
+                "MIGRATE",
+                "REVIEW"
+            ]
+
+            if enforcement_action not in allowed_actions:
+                raise ValueError(
+                    "Invalid enforcement action."
+                )
+
+            policy.enforcement_action = (
+                enforcement_action
+            )
+
+        policy.updated_at = datetime.utcnow()
+
+        db.session.commit()
+
+        return policy.to_dict()
+
+    # ==========================================================
+    # EVALUATE POLICY
     # ==========================================================
 
     @staticmethod
     def evaluate_policy(algorithm_name):
-        """
-        Enterprise policy evaluation.
-        """
 
-        algorithm_name = algorithm_name.upper().strip()
-
-        algorithm = AlgorithmInventoryService.get_algorithm_by_name(
-            algorithm_name
+        algorithm_name = (
+            algorithm_name.strip()
         )
 
-        if algorithm is None:
+        PolicyEngineService.initialize_default_policy()
 
-            AlgorithmInventoryService.auto_register_algorithm(
-                algorithm_name
-            )
-
-            algorithm = AlgorithmInventoryService.get_algorithm_by_name(
-                algorithm_name
-            )
+        policy = CryptoPolicy.query.filter_by(
+            algorithm_name=algorithm_name
+        ).first()
 
         risk = RiskAssessmentService.assess_algorithm(
             algorithm_name
         )
 
-        if risk["risk_level"] == "CRITICAL":
+        # ------------------------------------------------------
+        # Explicit policy always has priority
+        # ------------------------------------------------------
 
-            decision = "BLOCK"
+        if policy:
 
-        elif risk["risk_level"] == "HIGH":
+            if policy.enforcement_action == "BLOCK":
 
-            decision = "MIGRATION_REQUIRED"
+                decision = "BLOCK"
 
-        elif risk["risk_level"] == "MEDIUM":
+            elif policy.enforcement_action == "MIGRATE":
 
-            decision = "HYBRID_REQUIRED"
+                decision = "MIGRATION_REQUIRED"
 
-        elif risk["risk_level"] == "SAFE":
+            elif policy.enforcement_action == "REVIEW":
 
-            decision = "ALLOW"
+                decision = "MANUAL_REVIEW"
 
-        else:
+            elif (
+                policy.enabled
+                and policy.enforcement_action == "ALLOW"
+            ):
 
-            decision = "MANUAL_REVIEW"
+                decision = "ALLOW"
+
+            else:
+
+                decision = "BLOCK"
+
+            return {
+
+                "algorithm":
+                    algorithm_name,
+
+                "decision":
+                    decision,
+
+                "policy_enabled":
+                    policy.enabled,
+
+                "deployment_mode":
+                    policy.deployment_mode,
+
+                "enforcement_action":
+                    policy.enforcement_action,
+
+                "risk_level":
+                    risk["risk_level"],
+
+                "risk_score":
+                    risk["risk_score"],
+
+                "quantum_vulnerable":
+                    risk.get(
+                        "quantum_vulnerable"
+                    ),
+
+                "recommended_algorithm":
+                    risk.get(
+                        "recommended_algorithm"
+                    ),
+
+                "recommendation":
+                    risk.get(
+                        "recommendation"
+                    )
+            }
+
+        # ------------------------------------------------------
+        # Unknown algorithm
+        # ------------------------------------------------------
 
         return {
 
@@ -150,7 +451,16 @@ class PolicyEngineService:
                 algorithm_name,
 
             "decision":
-                decision,
+                "MANUAL_REVIEW",
+
+            "policy_enabled":
+                False,
+
+            "deployment_mode":
+                "UNKNOWN",
+
+            "enforcement_action":
+                "REVIEW",
 
             "risk_level":
                 risk["risk_level"],
@@ -167,128 +477,53 @@ class PolicyEngineService:
                 risk.get(
                     "recommendation"
                 )
-
         }
 
     # ==========================================================
-    # Existing API (Compatible)
+    # CHECK ALGORITHM
     # ==========================================================
 
     @staticmethod
     def check_algorithm(algorithm_name):
-        """
-        Existing endpoint compatibility.
-        """
 
-        policy = PolicyEngineService.evaluate_policy(
+        result = PolicyEngineService.evaluate_policy(
             algorithm_name
         )
 
-        algorithm = AlgorithmInventoryService.get_algorithm_by_name(
-            algorithm_name
-        )
-
-        if algorithm is None:
+        if result["decision"] == "BLOCK":
 
             return {
-
-                "status": "UNKNOWN",
-
-                "decision": "MANUAL_REVIEW"
-
+                **result,
+                "status": "BLOCKED"
             }
 
-        if policy["decision"] == "BLOCK":
-
-            create_audit_log(
-
-                user_id=None,
-
-                action="POLICY_BLOCK",
-
-                module="POLICY_ENGINE",
-
-                status="FAILED",
-
-                description=(
-                    f"{algorithm.algorithm_name} "
-                    f"blocked by enterprise policy."
-                )
-
-            )
-
-            db.session.commit()
+        if result["decision"] == "ALLOW":
 
             return {
-
-                "algorithm":
-                    algorithm.algorithm_name,
-
-                "status":
-                    "BLOCKED",
-
-                "decision":
-                    "REJECT",
-
-                "risk_level":
-                    policy["risk_level"],
-
-                "recommended_algorithm":
-                    policy["recommended_algorithm"]
-
+                **result,
+                "status": "ACTIVE"
             }
 
-        if algorithm.active:
+        if result["decision"] == "MIGRATION_REQUIRED":
 
             return {
-
-                "algorithm":
-                    algorithm.algorithm_name,
-
-                "status":
-                    "ACTIVE",
-
-                "decision":
-                    "ALLOW",
-
-                "deployment_mode":
-                    algorithm.deployment_mode,
-
-                "risk_level":
-                    policy["risk_level"]
-
+                **result,
+                "status": "MIGRATION_REQUIRED"
             }
 
         return {
-
-            "algorithm":
-                algorithm.algorithm_name,
-
-            "status":
-                "INACTIVE",
-
-            "decision":
-                "NOT_SELECTED",
-
-            "recommended_mode":
-                algorithm.recommended_mode,
-
-            "recommended_algorithm":
-                policy["recommended_algorithm"]
-
+            **result,
+            "status": "REVIEW_REQUIRED"
         }
 
     # ==========================================================
-    # Asset Discovery Integration
+    # DISCOVERED ASSET
     # ==========================================================
 
     @staticmethod
     def check_discovered_asset(asset):
-        """
-        Evaluate a discovered asset.
-        """
 
-        policy = PolicyEngineService.evaluate_policy(
+        result = PolicyEngineService.evaluate_policy(
             asset.public_key_algorithm
         )
 
@@ -304,51 +539,54 @@ class PolicyEngineService:
                 asset.public_key_algorithm,
 
             "decision":
-                policy["decision"],
+                result["decision"],
 
             "risk_level":
-                policy["risk_level"],
+                result["risk_level"],
+
+            "risk_score":
+                result["risk_score"],
+
+            "deployment_mode":
+                result.get(
+                    "deployment_mode"
+                ),
 
             "recommendation":
-                policy["recommended_algorithm"]
-
+                result.get(
+                    "recommended_algorithm"
+                )
         }
 
     # ==========================================================
-    # Dashboard Summary
+    # DASHBOARD SUMMARY
     # ==========================================================
 
     @staticmethod
     def dashboard_summary():
 
-        algorithms = AlgorithmAsset.query.all()
-
-        assessment = RiskAssessmentService.assess_inventory()
+        policy = PolicyEngineService.get_policy()
 
         return {
 
             "total_algorithms":
-                len(algorithms),
+                policy["total_algorithms"],
 
             "approved":
-                assessment["approved"],
+                policy["allowed_count"],
 
             "blocked":
-                assessment["blocked"],
+                policy["blocked_count"],
 
-            "migration_required":
-                assessment["migration_required"],
+            "conditional":
+                policy["conditional_count"],
 
-            "critical":
-                assessment["critical_risk"],
+            "approved_algorithms":
+                policy["approved_algorithms"],
 
-            "high":
-                assessment["high_risk"],
-
-            "safe":
-                assessment["safe_assets"],
+            "blocked_algorithms":
+                policy["blocked_algorithms"],
 
             "timestamp":
                 datetime.utcnow().isoformat()
-
         }

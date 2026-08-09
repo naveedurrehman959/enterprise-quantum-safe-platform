@@ -1,3 +1,4 @@
+
 from datetime import datetime
 
 from app import db
@@ -16,8 +17,13 @@ class AlgorithmInventoryService:
     - Deployment mode management
     """
 
+    # ==========================================================
+    # ANALYZE ALGORITHM
+    # ==========================================================
+
     @staticmethod
     def analyze_algorithm(name):
+
         algorithm = name.upper().strip()
 
         result = {
@@ -29,7 +35,9 @@ class AlgorithmInventoryService:
             "description": "",
         }
 
-        # ---------- Classical ----------
+        # ======================================================
+        # Classical Algorithms
+        # ======================================================
 
         if algorithm.startswith("RSA"):
 
@@ -37,28 +45,43 @@ class AlgorithmInventoryService:
                 "category": "CLASSICAL",
                 "risk_level": "HIGH",
                 "recommended_mode": "HYBRID",
-                "description": "Classical RSA algorithm vulnerable to future quantum attacks."
+                "description": (
+                    "Classical RSA algorithm vulnerable "
+                    "to future quantum attacks."
+                ),
             })
 
-        elif algorithm.startswith("ECC") or algorithm.startswith("ECDSA"):
+        elif (
+            algorithm.startswith("ECC")
+            or algorithm.startswith("ECDSA")
+            or algorithm.startswith("ECDHE")
+        ):
 
             result.update({
                 "category": "CLASSICAL",
                 "risk_level": "HIGH",
                 "recommended_mode": "HYBRID",
-                "description": "Elliptic Curve Cryptography."
+                "description": (
+                    "Elliptic Curve Cryptography is "
+                    "vulnerable to future quantum attacks."
+                ),
             })
 
-        # ---------- Symmetric ----------
+        # ======================================================
+        # Symmetric Algorithms
+        # ======================================================
 
         elif algorithm.startswith("AES"):
 
             result.update({
                 "category": "SYMMETRIC",
                 "risk_level": "SAFE",
-                "recommended_mode": "ALL",
+                "recommended_mode": "PURE_PQC",
                 "active": True,
-                "description": "Quantum-resistant symmetric encryption."
+                "description": (
+                    "Modern symmetric encryption. "
+                    "AES-256 is recommended for quantum-safe use."
+                ),
             })
 
         elif algorithm.startswith("CHACHA20"):
@@ -66,24 +89,49 @@ class AlgorithmInventoryService:
             result.update({
                 "category": "SYMMETRIC",
                 "risk_level": "SAFE",
-                "recommended_mode": "ALL",
+                "recommended_mode": "PURE_PQC",
                 "active": True,
-                "description": "Modern symmetric cipher."
+                "description": (
+                    "Modern symmetric cipher with "
+                    "strong security properties."
+                ),
             })
 
-        # ---------- Hash ----------
+        # ======================================================
+        # Hash Algorithms
+        # ======================================================
 
         elif algorithm.startswith("SHA"):
 
-            result.update({
-                "category": "HASH",
-                "risk_level": "SAFE",
-                "recommended_mode": "ALL",
-                "active": True,
-                "description": "Cryptographic hash algorithm."
-            })
+            if algorithm in ["SHA1", "SHA-1"]:
 
-        # ---------- PQC ----------
+                result.update({
+                    "category": "HASH",
+                    "risk_level": "CRITICAL",
+                    "recommended_mode": "HYBRID",
+                    "allowed": False,
+                    "active": False,
+                    "description": (
+                        "SHA-1 is deprecated and must not "
+                        "be used for secure cryptographic operations."
+                    ),
+                })
+
+            else:
+
+                result.update({
+                    "category": "HASH",
+                    "risk_level": "SAFE",
+                    "recommended_mode": "PURE_PQC",
+                    "active": True,
+                    "description": (
+                        "Modern cryptographic hash algorithm."
+                    ),
+                })
+
+        # ======================================================
+        # Post-Quantum KEM
+        # ======================================================
 
         elif algorithm.startswith("ML-KEM"):
 
@@ -91,8 +139,16 @@ class AlgorithmInventoryService:
                 "category": "PQC_KEM",
                 "risk_level": "SAFE",
                 "recommended_mode": "PURE_PQC",
-                "description": "NIST standardized post-quantum key encapsulation."
+                "active": True,
+                "description": (
+                    "NIST standardized post-quantum "
+                    "key encapsulation mechanism."
+                ),
             })
+
+        # ======================================================
+        # Post-Quantum Signatures
+        # ======================================================
 
         elif algorithm.startswith("ML-DSA"):
 
@@ -100,7 +156,11 @@ class AlgorithmInventoryService:
                 "category": "PQC_SIGNATURE",
                 "risk_level": "SAFE",
                 "recommended_mode": "PURE_PQC",
-                "description": "NIST standardized post-quantum digital signature."
+                "active": True,
+                "description": (
+                    "NIST standardized post-quantum "
+                    "digital signature algorithm."
+                ),
             })
 
         elif algorithm.startswith("SLH-DSA"):
@@ -109,10 +169,34 @@ class AlgorithmInventoryService:
                 "category": "PQC_SIGNATURE",
                 "risk_level": "SAFE",
                 "recommended_mode": "PURE_PQC",
-                "description": "Stateless hash-based digital signature."
+                "active": True,
+                "description": (
+                    "Stateless hash-based post-quantum "
+                    "digital signature algorithm."
+                ),
             })
 
-        # ---------- Hybrid ----------
+        # ======================================================
+        # Weak Algorithms
+        # ======================================================
+
+        elif algorithm in ["DES", "3DES", "TRIPLEDES"]:
+
+            result.update({
+                "category": "CLASSICAL",
+                "risk_level": "CRITICAL",
+                "recommended_mode": "HYBRID",
+                "allowed": False,
+                "active": False,
+                "description": (
+                    "Deprecated symmetric encryption algorithm "
+                    "that must not be used."
+                ),
+            })
+
+        # ======================================================
+        # Hybrid Algorithms
+        # ======================================================
 
         elif "+" in algorithm:
 
@@ -120,10 +204,18 @@ class AlgorithmInventoryService:
                 "category": "HYBRID",
                 "risk_level": "SAFE",
                 "recommended_mode": "HYBRID",
-                "description": "Hybrid cryptography combining classical and post-quantum algorithms."
+                "active": True,
+                "description": (
+                    "Hybrid cryptography combining classical "
+                    "and post-quantum algorithms."
+                ),
             })
 
         return result
+
+    # ==========================================================
+    # LIST ALGORITHMS
+    # ==========================================================
 
     @staticmethod
     def list_algorithms():
@@ -136,13 +228,38 @@ class AlgorithmInventoryService:
             ).all()
         ]
 
+    # ==========================================================
+    # CREATE ALGORITHM
+    # ==========================================================
+
     @staticmethod
     def create_algorithm(data):
         """
         Create a new algorithm if it does not already exist.
+
+        If the algorithm already exists, refresh its
+        classification and discovered key size.
         """
 
-        algorithm_name = data["algorithm_name"].upper().strip()
+        algorithm_name = (
+            data["algorithm_name"]
+            .upper()
+            .strip()
+        )
+
+        # ------------------------------------------------------
+        # Analyze algorithm
+        # ------------------------------------------------------
+
+        analysis = (
+            AlgorithmInventoryService.analyze_algorithm(
+                algorithm_name
+            )
+        )
+
+        # ------------------------------------------------------
+        # Check for existing algorithm
+        # ------------------------------------------------------
 
         existing = AlgorithmAsset.query.filter_by(
             algorithm_name=algorithm_name
@@ -150,18 +267,57 @@ class AlgorithmInventoryService:
 
         if existing:
 
-            if (
-                data.get("key_size")
-                and not existing.key_size
-            ):
+            # Update discovered key size when available
+            if data.get("key_size"):
                 existing.key_size = data["key_size"]
-                db.session.commit()
+
+            # Refresh classification
+            existing.category = analysis["category"]
+            existing.allowed = analysis["allowed"]
+            existing.active = analysis["active"]
+            existing.risk_level = analysis["risk_level"]
+            existing.recommended_mode = analysis["recommended_mode"]
+            existing.description = analysis["description"]
+
+            # Keep existing deployment mode unless invalid
+            valid_deployment_modes = [
+                "CLASSICAL",
+                "HYBRID",
+                "PURE_PQC",
+            ]
+
+            if existing.deployment_mode not in valid_deployment_modes:
+                existing.deployment_mode = (
+                    analysis["recommended_mode"]
+                )
+
+            db.session.commit()
 
             return existing.to_dict()
 
-        analysis = AlgorithmInventoryService.analyze_algorithm(
-            algorithm_name
+        # ------------------------------------------------------
+        # Validate deployment mode
+        # ------------------------------------------------------
+
+        valid_deployment_modes = [
+            "CLASSICAL",
+            "HYBRID",
+            "PURE_PQC",
+        ]
+
+        recommended_mode = (
+            analysis.get("recommended_mode")
         )
+
+        deployment_mode = (
+            recommended_mode
+            if recommended_mode in valid_deployment_modes
+            else "CLASSICAL"
+        )
+
+        # ------------------------------------------------------
+        # Create database record
+        # ------------------------------------------------------
 
         algorithm = AlgorithmAsset(
 
@@ -177,14 +333,13 @@ class AlgorithmInventoryService:
 
             active=analysis["active"],
 
-            deployment_mode="CLASSICAL",
+            deployment_mode=deployment_mode,
 
             risk_level=analysis["risk_level"],
 
             recommended_mode=analysis["recommended_mode"],
 
-            description=analysis["description"]
-
+            description=analysis["description"],
         )
 
         db.session.add(algorithm)
@@ -192,14 +347,18 @@ class AlgorithmInventoryService:
 
         return algorithm.to_dict()
 
+    # ==========================================================
+    # AUTO REGISTER DISCOVERED ALGORITHM
+    # ==========================================================
+
     @staticmethod
     def auto_register_algorithm(
         algorithm_name,
         key_size=None
     ):
         """
-        Automatically register an algorithm discovered during
-        Asset Discovery.
+        Automatically register an algorithm discovered
+        during Asset Discovery.
         """
 
         return AlgorithmInventoryService.create_algorithm({
@@ -208,9 +367,12 @@ class AlgorithmInventoryService:
 
             "key_size": key_size,
 
-            "version": "Discovered"
-
+            "version": "Discovered",
         })
+
+    # ==========================================================
+    # GET ALGORITHM
+    # ==========================================================
 
     @staticmethod
     def get_algorithm_by_name(name):
@@ -222,36 +384,67 @@ class AlgorithmInventoryService:
             algorithm_name=name.upper().strip()
         ).first()
 
+    # ==========================================================
+    # SET ALLOWED
+    # ==========================================================
+
     @staticmethod
-    def set_allowed(algorithm_id, allowed):
+    def set_allowed(
+        algorithm_id,
+        allowed
+    ):
 
         algorithm = AlgorithmAsset.query.get_or_404(
             algorithm_id
         )
 
-        algorithm.allowed = allowed
+        algorithm.allowed = bool(allowed)
 
         db.session.commit()
 
         return algorithm.to_dict()
 
+    # ==========================================================
+    # SET ACTIVE
+    # ==========================================================
+
     @staticmethod
-    def set_active(algorithm_id, active):
+    def set_active(
+        algorithm_id,
+        active
+    ):
 
         algorithm = AlgorithmAsset.query.get_or_404(
             algorithm_id
         )
 
-        algorithm.active = active
+        algorithm.active = bool(active)
 
         db.session.commit()
 
         return algorithm.to_dict()
+
+    # ==========================================================
+    # SET DEPLOYMENT MODE
+    # ==========================================================
 
     @staticmethod
     def set_deployment_mode(mode):
 
         mode = mode.upper()
+
+        allowed_modes = [
+            "CLASSICAL",
+            "HYBRID",
+            "PURE_PQC",
+        ]
+
+        if mode not in allowed_modes:
+
+            raise ValueError(
+                "Invalid deployment mode. "
+                "Use CLASSICAL, HYBRID or PURE_PQC."
+            )
 
         algorithms = AlgorithmAsset.query.all()
 
@@ -260,37 +453,37 @@ class AlgorithmInventoryService:
             if mode == "CLASSICAL":
 
                 algorithm.active = (
-                    algorithm.allowed and
-                    algorithm.category in [
+                    algorithm.allowed
+                    and algorithm.category in [
                         "CLASSICAL",
                         "SYMMETRIC",
-                        "HASH"
+                        "HASH",
                     ]
                 )
 
             elif mode == "HYBRID":
 
                 algorithm.active = (
-                    algorithm.allowed and
-                    algorithm.category in [
+                    algorithm.allowed
+                    and algorithm.category in [
                         "CLASSICAL",
                         "HYBRID",
                         "PQC_KEM",
                         "PQC_SIGNATURE",
                         "SYMMETRIC",
-                        "HASH"
+                        "HASH",
                     ]
                 )
 
             elif mode == "PURE_PQC":
 
                 algorithm.active = (
-                    algorithm.allowed and
-                    algorithm.category in [
+                    algorithm.allowed
+                    and algorithm.category in [
                         "PQC_KEM",
                         "PQC_SIGNATURE",
                         "SYMMETRIC",
-                        "HASH"
+                        "HASH",
                     ]
                 )
 
@@ -299,9 +492,15 @@ class AlgorithmInventoryService:
         db.session.commit()
 
         return {
-            "message": "Deployment mode updated successfully.",
-            "deployment_mode": mode
+            "message": (
+                "Deployment mode updated successfully."
+            ),
+            "deployment_mode": mode,
         }
+
+    # ==========================================================
+    # SUMMARY
+    # ==========================================================
 
     @staticmethod
     def get_summary():
@@ -310,37 +509,55 @@ class AlgorithmInventoryService:
 
         return {
 
-            "module": "Algorithm Inventory",
+            "module":
+                "Algorithm Inventory",
 
             "total_algorithms":
                 len(algorithms),
 
             "allowed_algorithms":
-                sum(a.allowed for a in algorithms),
+                sum(
+                    bool(a.allowed)
+                    for a in algorithms
+                ),
 
             "disabled_algorithms":
-                sum(not a.allowed for a in algorithms),
+                sum(
+                    not bool(a.allowed)
+                    for a in algorithms
+                ),
 
             "active_algorithms":
-                sum(a.active for a in algorithms),
+                sum(
+                    bool(a.active)
+                    for a in algorithms
+                ),
 
             "classical":
-                sum(a.category == "CLASSICAL"
-                    for a in algorithms),
+                sum(
+                    a.category == "CLASSICAL"
+                    for a in algorithms
+                ),
 
             "pqc":
-                sum(a.category.startswith("PQC")
-                    for a in algorithms),
+                sum(
+                    a.category.startswith("PQC")
+                    for a in algorithms
+                ),
 
             "hybrid":
-                sum(a.category == "HYBRID"
-                    for a in algorithms),
+                sum(
+                    a.category == "HYBRID"
+                    for a in algorithms
+                ),
 
             "deployment_mode":
-                algorithms[0].deployment_mode
-                if algorithms else "CLASSICAL",
+                (
+                    algorithms[0].deployment_mode
+                    if algorithms
+                    else "CLASSICAL"
+                ),
 
             "timestamp":
-                datetime.utcnow().isoformat()
-
-        }
+                datetime.utcnow().isoformat(),
+         }

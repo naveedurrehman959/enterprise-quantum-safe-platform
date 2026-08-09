@@ -1,5 +1,6 @@
 FROM python:3.13-slim
 
+LABEL org.opencontainers.image.source="https://github.com/naveedurrehman959/enterprise-quantum-safe-platform"
 
 WORKDIR /app
 

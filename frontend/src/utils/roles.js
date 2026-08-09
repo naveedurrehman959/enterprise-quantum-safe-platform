@@ -1,5 +1,4 @@
 export const ROLE_PERMISSIONS = {
-
     admin: [
         "*"
     ],
@@ -7,6 +6,7 @@ export const ROLE_PERMISSIONS = {
     analyst: [
         "/dashboard",
         "/analytics",
+        "/discovery",
         "/risk",
         "/monitoring",
         "/reports",
@@ -22,6 +22,7 @@ export const ROLE_PERMISSIONS = {
 
     pki: [
         "/dashboard",
+        "/discovery",
         "/pki",
         "/crypto-agility",
         "/inventory"
@@ -31,5 +32,4 @@ export const ROLE_PERMISSIONS = {
         "/dashboard",
         "/profile"
     ]
-
 };

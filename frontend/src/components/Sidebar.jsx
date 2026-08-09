@@ -4,23 +4,27 @@ import { ROLE_PERMISSIONS } from "../utils/roles";
 
 const menuItems = [
   { name: "Dashboard", path: "/dashboard" },
-  { name: "Profile", path: "/profile" },
   { name: "Analytics", path: "/analytics" },
+
+  { name: "Asset Discovery", path: "/discovery" },
   { name: "Inventory", path: "/inventory" },
+  { name: "Risk Assessment", path: "/risk" },
   { name: "Policy Engine", path: "/policy" },
   { name: "Crypto Agility", path: "/crypto-agility" },
   { name: "Migration Engine", path: "/migration" },
-  { name: "Risk Assessment", path: "/risk" },
+
   { name: "PKI", path: "/pki" },
   { name: "Compliance", path: "/compliance" },
   { name: "Monitoring", path: "/monitoring" },
   { name: "Audit Logs", path: "/audit" },
   { name: "Notifications", path: "/notifications" },
+
   { name: "Search", path: "/search" },
   { name: "Reports", path: "/reports" },
+
+  { name: "Profile", path: "/profile" },
   { name: "Settings", path: "/settings" },
 ];
-
 function Sidebar() {
   const { user } = useAuth();
 

@@ -277,12 +277,14 @@ class RiskAssessmentService:
                 return value
 
         return None
-        @classmethod
+    @classmethod
     def assess_algorithm(cls, algorithm):
         """
-        Assess a cryptographic algorithm and determine its
-        quantum risk.
+        Assess a cryptographic algorithm and determine quantum risk.
         """
+
+        if not algorithm:
+            algorithm = "UNKNOWN"
 
         algorithm = algorithm.upper().strip()
 
@@ -309,13 +311,11 @@ class RiskAssessmentService:
 
                 **risk,
 
-                "migration_required":
-                    migration_required,
+                "migration_required": migration_required,
 
-                "decision":
-                    decision
-
+                "decision": decision
             }
+
 
         return {
 
@@ -336,9 +336,7 @@ class RiskAssessmentService:
             "recommendation":
                 "Manual security review required.",
 
-            "recommended_algorithm":
-                None
-
+            "recommended_algorithm": None
         }
 
     @classmethod
@@ -521,7 +519,7 @@ class RiskAssessmentService:
                 )
 
         }
-            @classmethod
+    @classmethod
     def assess_inventory(cls):
         """
         Assess all registered algorithms in the inventory.
@@ -612,9 +610,7 @@ class RiskAssessmentService:
 
             "quantum_safe_algorithms":
                 quantum_safe
-
         }
-
     @staticmethod
     def calculate_quantum_readiness(summary):
         """

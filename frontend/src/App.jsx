@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 
+import AssetDiscovery from "./pages/AssetDiscovery";
 import Vault from "./pages/Vault";
 import Login from "./pages/Login";
 
@@ -28,13 +29,20 @@ function App() {
   return (
     <Routes>
 
-      {/* Public Route */}
+      {/* =====================================================
+          PUBLIC ROUTES
+      ====================================================== */}
+
       <Route
         path="/"
         element={<Login />}
       />
 
-      {/* Protected Routes */}
+
+      {/* =====================================================
+          PROTECTED APPLICATION
+      ====================================================== */}
+
       <Route
         element={
           <ProtectedRoute>
@@ -43,7 +51,10 @@ function App() {
         }
       >
 
-        {/* Accessible to every authenticated user */}
+        {/* =================================================
+            GENERAL
+        ================================================== */}
+
         <Route
           path="/dashboard"
           element={<Dashboard />}
@@ -54,7 +65,10 @@ function App() {
           element={<Profile />}
         />
 
-        {/* Role Protected Routes */}
+
+        {/* =================================================
+            ANALYTICS
+        ================================================== */}
 
         <Route
           path="/analytics"
@@ -65,6 +79,25 @@ function App() {
           }
         />
 
+
+        {/* =================================================
+            ASSET DISCOVERY
+        ================================================== */}
+
+        <Route
+          path="/discovery"
+          element={
+            <RoleRoute>
+              <AssetDiscovery />
+            </RoleRoute>
+          }
+        />
+
+
+        {/* =================================================
+            CRYPTOGRAPHIC INVENTORY
+        ================================================== */}
+
         <Route
           path="/inventory"
           element={
@@ -73,6 +106,11 @@ function App() {
             </RoleRoute>
           }
         />
+
+
+        {/* =================================================
+            CRYPTO POLICY ENGINE
+        ================================================== */}
 
         <Route
           path="/policy"
@@ -83,14 +121,38 @@ function App() {
           }
         />
 
+
+        {/* =================================================
+            RISK ASSESSMENT
+        ================================================== */}
+
         <Route
-          path="/notifications"
+          path="/risk"
           element={
             <RoleRoute>
-              <Notifications />
+              <Risk />
             </RoleRoute>
           }
         />
+
+
+        {/* =================================================
+            MIGRATION ENGINE
+        ================================================== */}
+
+        <Route
+          path="/migration"
+          element={
+            <RoleRoute>
+              <MigrationEngine />
+            </RoleRoute>
+          }
+        />
+
+
+        {/* =================================================
+            CRYPTO AGILITY
+        ================================================== */}
 
         <Route
           path="/crypto-agility"
@@ -101,35 +163,24 @@ function App() {
           }
         />
 
+
+        {/* =================================================
+            VAULT / KEY MANAGEMENT
+        ================================================== */}
+
         <Route
-          path="/migration"
+          path="/vault"
           element={
             <RoleRoute>
-              <MigrationEngine />
-            </RoleRoute>
-          }
-        />
-        <Route
- path="/vault"
- element={<Vault/>}
-/>
-        <Route
-          path="/risk"
-          element={
-            <RoleRoute>
-              <Risk />
+              <Vault />
             </RoleRoute>
           }
         />
 
-        <Route
-          path="/reports"
-          element={
-            <RoleRoute>
-              <Reports />
-            </RoleRoute>
-          }
-        />
+
+        {/* =================================================
+            PKI
+        ================================================== */}
 
         <Route
           path="/pki"
@@ -140,6 +191,11 @@ function App() {
           }
         />
 
+
+        {/* =================================================
+            COMPLIANCE
+        ================================================== */}
+
         <Route
           path="/compliance"
           element={
@@ -148,6 +204,11 @@ function App() {
             </RoleRoute>
           }
         />
+
+
+        {/* =================================================
+            MONITORING
+        ================================================== */}
 
         <Route
           path="/monitoring"
@@ -158,6 +219,39 @@ function App() {
           }
         />
 
+
+        {/* =================================================
+            NOTIFICATIONS
+        ================================================== */}
+
+        <Route
+          path="/notifications"
+          element={
+            <RoleRoute>
+              <Notifications />
+            </RoleRoute>
+          }
+        />
+
+
+        {/* =================================================
+            REPORTING
+        ================================================== */}
+
+        <Route
+          path="/reports"
+          element={
+            <RoleRoute>
+              <Reports />
+            </RoleRoute>
+          }
+        />
+
+
+        {/* =================================================
+            AUDIT LOGS
+        ================================================== */}
+
         <Route
           path="/audit"
           element={
@@ -167,6 +261,11 @@ function App() {
           }
         />
 
+
+        {/* =================================================
+            SEARCH
+        ================================================== */}
+
         <Route
           path="/search"
           element={
@@ -175,6 +274,11 @@ function App() {
             </RoleRoute>
           }
         />
+
+
+        {/* =================================================
+            SETTINGS
+        ================================================== */}
 
         <Route
           path="/settings"
@@ -186,6 +290,11 @@ function App() {
         />
 
       </Route>
+
+
+      {/* =====================================================
+          UNKNOWN ROUTES
+      ====================================================== */}
 
       <Route
         path="*"

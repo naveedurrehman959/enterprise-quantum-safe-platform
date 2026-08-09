@@ -1,28 +1,28 @@
 """
-Business Orchestration Layer
+Asset Discovery Business Orchestration Layer
 
 Workflow:
 
 Request
-   ↓
+    ↓
 DNS Resolver
-   ↓
+    ↓
 TLS Scanner
-   ↓
+    ↓
 Certificate Parser
-   ↓
-Database
-   ↓
+    ↓
+Discovered Asset Database
+    ↓
 Algorithm Inventory
-   ↓
+    ↓
 Risk Assessment
-   ↓
+    ↓
 Policy Engine
-   ↓
+    ↓
 Migration Engine
-   ↓
+    ↓
 Notification Center
-   ↓
+    ↓
 Audit Logs
 """
 
@@ -32,13 +32,9 @@ import logging
 from app import db
 
 from app.asset_discovery.models import DiscoveredAsset
-
 from app.asset_discovery.dns import DNSResolver
 from app.asset_discovery.scanner import TLSScanner
 from app.asset_discovery.certificate_parser import CertificateParser
-
-
-# Security Services
 
 from app.algorithm_inventory.services import (
     AlgorithmInventoryService
@@ -53,136 +49,163 @@ from app.policy_engine.services import (
 )
 
 
-# Optional integrations
-try:
-    from app.migration_engine.services import (
-        MigrationEngineService
-    )
-except Exception:
-    MigrationEngineService = None
-
-
-try:
-    from app.notification.services import (
-        NotificationService
-    )
-except Exception:
-    NotificationService = None
-
-
-try:
-    from app.audit.services import (
-        AuditService
-    )
-except Exception:
-    AuditService = None
-
-
 logger = logging.getLogger(__name__)
 
 
 class AssetDiscoveryService:
 
+    # ==========================================================
+    # Scan Asset
+    # ==========================================================
 
     @staticmethod
     def scan_asset(target: str, port: int = 443):
 
-        """
-        Complete enterprise discovery workflow.
-        """
+        asset = None
 
         try:
 
-            # --------------------------------
-            # DNS Resolution
-            # --------------------------------
+            logger.info(
+                "Starting asset discovery for %s:%s",
+                target,
+                port
+            )
+
+            # ==================================================
+            # 1. DNS Resolution
+            # ==================================================
 
             host = DNSResolver.resolve(target)
 
+            if not host:
+                raise ValueError(
+                    f"DNS resolution failed for {target}"
+                )
 
-            # --------------------------------
-            # TLS Scan
-            # --------------------------------
+            hostname = host.get("hostname")
+            ip_address = host.get("ip_address")
+
+            logger.info(
+                "DNS resolved %s -> %s",
+                hostname,
+                ip_address
+            )
+
+            # ==================================================
+            # 2. TLS Scan
+            # ==================================================
 
             scan = TLSScanner.scan(
-                hostname=host["hostname"],
-                ip_address=host["ip_address"],
+                hostname=hostname,
+                ip_address=ip_address,
                 port=port
             )
 
+            if not scan:
+                raise ValueError(
+                    f"TLS scan returned no result for {target}"
+                )
 
-            # --------------------------------
-            # Certificate Parsing
-            # --------------------------------
+            # ==================================================
+            # 3. Certificate Parsing
+            # ==================================================
 
-            cert = CertificateParser.parse(
-                scan["certificate_der"]
+            certificate_der = scan.get(
+                "certificate_der"
             )
 
+            if not certificate_der:
+                raise ValueError(
+                    f"No TLS certificate returned for {target}"
+                )
+
+            cert = CertificateParser.parse(
+                certificate_der
+            )
+
+            if not cert:
+                raise ValueError(
+                    f"Certificate parsing failed for {target}"
+                )
+
+            # ==================================================
+            # 4. Extract Algorithm
+            # ==================================================
 
             algorithm = cert.get(
                 "public_key_algorithm"
             )
 
+            if algorithm:
 
-            # --------------------------------
-            # Prevent Duplicate Assets
-            # --------------------------------
+                algorithm = str(
+                    algorithm
+                ).strip().upper()
+
+            else:
+
+                algorithm = None
+
+            logger.info(
+                "Certificate algorithm for %s: %s",
+                hostname,
+                algorithm
+            )
+
+            # ==================================================
+            # 5. Find Existing Asset
+            # ==================================================
 
             asset = DiscoveredAsset.query.filter_by(
-                hostname=host["hostname"],
+                hostname=hostname,
                 port=port
             ).first()
-
-
 
             if asset:
 
                 logger.info(
-                    "Updating existing asset %s",
-                    target
+                    "Updating existing discovered asset: %s:%s",
+                    hostname,
+                    port
                 )
 
             else:
 
+                logger.info(
+                    "Creating new discovered asset: %s:%s",
+                    hostname,
+                    port
+                )
+
                 asset = DiscoveredAsset()
 
+            # ==================================================
+            # 6. Update Discovered Asset
+            # ==================================================
 
+            asset.hostname = hostname
 
-
-            # --------------------------------
-            # Update Asset Information
-            # --------------------------------
-
-            asset.hostname = host["hostname"]
-
-            asset.ip_address = host["ip_address"]
+            asset.ip_address = ip_address
 
             asset.port = port
 
-
-            asset.tls_version = (
-                scan.get("tls_version")
+            asset.tls_version = scan.get(
+                "tls_version"
             )
 
-            asset.cipher_suite = (
-                scan.get("cipher_suite")
+            asset.cipher_suite = scan.get(
+                "cipher_suite"
             )
-
 
             asset.public_key_algorithm = algorithm
 
-            asset.key_size = (
-                cert.get("key_size")
+            asset.key_size = cert.get(
+                "key_size"
             )
 
-
-            asset.signature_algorithm = (
-                cert.get(
-                    "signature_algorithm"
-                )
+            asset.signature_algorithm = cert.get(
+                "signature_algorithm"
             )
-
 
             asset.issuer = cert.get(
                 "issuer"
@@ -196,267 +219,244 @@ class AssetDiscoveryService:
                 "serial_number"
             )
 
-
-            asset.fingerprint_sha256 = (
-                cert.get(
-                    "fingerprint_sha256"
-                )
+            asset.fingerprint_sha256 = cert.get(
+                "fingerprint_sha256"
             )
 
-
-            asset.valid_from = (
-                cert.get("valid_from")
+            asset.valid_from = cert.get(
+                "valid_from"
             )
 
-
-            asset.valid_to = (
-                cert.get("valid_to")
+            asset.valid_to = cert.get(
+                "valid_to"
             )
-
 
             asset.scan_status = "RUNNING"
 
-            asset.last_scanned = (
-                datetime.utcnow()
-            )
+            asset.scan_error = None
 
+            asset.last_scanned = datetime.utcnow()
 
             db.session.add(asset)
 
             db.session.commit()
 
+            logger.info(
+                "Discovered asset saved successfully. ID=%s",
+                asset.id
+            )
 
+            # ==================================================
+            # 7. Algorithm Inventory
+            # ==================================================
 
-            # --------------------------------
-            # Algorithm Inventory
-            # --------------------------------
+            if not algorithm:
 
-            try:
-
-                AlgorithmInventoryService.auto_register_algorithm(
-                    algorithm_name=algorithm,
-                    key_size=asset.key_size
-                )
-
-            except Exception as e:
-
-                logger.error(
-                    "Inventory update failed: %s",
-                    e
-                )
-
-
-
-            # --------------------------------
-            # Risk Assessment
-            # --------------------------------
-
-            try:
-
-                risk = (
-                    RiskAssessmentService
-                    .assess_algorithm(
-                        algorithm
-                    )
-                )
-
-
-                asset.risk_level = (
-                    risk.get(
-                        "risk_level",
-                        "UNKNOWN"
-                    )
-                )
-
-
-                asset.risk_score = (
-                    risk.get(
-                        "risk_score",
-                        0
-                    )
-                )
-
-
-                asset.recommended_algorithm = (
-                    risk.get(
-                        "recommended_algorithm"
-                    )
-                )
-
-
-            except Exception as e:
-
-                logger.error(
-                    "Risk assessment failed: %s",
-                    e
+                logger.warning(
+                    "Certificate algorithm unavailable for %s",
+                    hostname
                 )
 
                 asset.risk_level = "UNKNOWN"
+                asset.risk_score = 50
+                asset.policy_decision = "MANUAL_REVIEW"
+                asset.migration_required = True
 
+            else:
 
+                try:
 
-            # --------------------------------
-            # Policy Evaluation
-            # --------------------------------
-
-            try:
-
-                policy = (
-                    PolicyEngineService
-                    .evaluate_policy(
+                    logger.info(
+                        "Registering algorithm in inventory: %s",
                         algorithm
                     )
-                )
 
+                    inventory_result = (
+                        AlgorithmInventoryService
+                        .auto_register_algorithm(
+                            algorithm_name=algorithm,
+                            key_size=asset.key_size
+                        )
+                    )
 
-                asset.policy_decision = (
-                    policy.get(
-                        "decision",
+                    logger.info(
+                        "Algorithm inventory result: %s",
+                        inventory_result
+                    )
+
+                except Exception as inventory_error:
+
+                    logger.exception(
+                        "Algorithm inventory registration failed "
+                        "for %s",
+                        algorithm
+                    )
+
+                    raise RuntimeError(
+                        "Algorithm inventory registration failed: "
+                        f"{inventory_error}"
+                    ) from inventory_error
+
+                # ==================================================
+                # 8. Risk Assessment
+                # ==================================================
+
+                try:
+
+                    risk = (
+                        RiskAssessmentService
+                        .assess_algorithm(
+                            algorithm
+                        )
+                    )
+
+                    asset.risk_level = risk.get(
+                        "risk_level",
                         "UNKNOWN"
                     )
-                )
 
-
-                asset.migration_required = (
-                    policy.get(
-                        "migration_required",
-                        False
+                    asset.risk_score = risk.get(
+                        "risk_score",
+                        0
                     )
-                )
 
+                    asset.recommended_algorithm = (
+                        risk.get(
+                            "recommended_algorithm"
+                        )
+                    )
 
-            except Exception as e:
+                    logger.info(
+                        "Risk assessment: %s -> %s (%s)",
+                        algorithm,
+                        asset.risk_level,
+                        asset.risk_score
+                    )
 
-                logger.error(
-                    "Policy evaluation failed: %s",
-                    e
-                )
+                except Exception as risk_error:
 
+                    logger.exception(
+                        "Risk assessment failed for %s",
+                        algorithm
+                    )
 
+                    asset.risk_level = "UNKNOWN"
+                    asset.risk_score = 50
 
-            # --------------------------------
-            # Migration Engine
-            # --------------------------------
+                    raise RuntimeError(
+                        "Risk assessment failed: "
+                        f"{risk_error}"
+                    ) from risk_error
 
-            if (
-                asset.migration_required
-                and MigrationEngineService
-            ):
+                # ==================================================
+                # 9. Policy Engine
+                # ==================================================
 
                 try:
 
-                    MigrationEngineService.create_plan(
-                        asset_id=asset.id,
-                        target_algorithm=
-                        asset.recommended_algorithm
+                    policy = (
+                        PolicyEngineService
+                        .evaluate_policy(
+                            algorithm
+                        )
                     )
 
-
-                except Exception as e:
-
-                    logger.error(
-                        "Migration plan failed: %s",
-                        e
+                    asset.policy_decision = policy.get(
+                        "decision",
+                        "MANUAL_REVIEW"
                     )
 
-
-
-            # --------------------------------
-            # Notifications
-            # --------------------------------
-
-            if (
-                asset.risk_level == "CRITICAL"
-                and NotificationService
-            ):
-
-                try:
-
-                    NotificationService.send(
-                        title=
-                        "Critical Quantum Risk Detected",
-
-                        message=
-                        f"{asset.hostname} uses {algorithm}"
+                    asset.migration_required = (
+                        asset.policy_decision
+                        in [
+                            "BLOCK",
+                            "MIGRATION_REQUIRED",
+                            "HYBRID_REQUIRED"
+                        ]
                     )
 
-                except Exception as e:
+                    if not asset.recommended_algorithm:
 
-                    logger.error(
-                        "Notification failed: %s",
-                        e
+                        asset.recommended_algorithm = (
+                            policy.get(
+                                "recommended_algorithm"
+                            )
+                        )
+
+                    logger.info(
+                        "Policy decision: %s -> %s",
+                        algorithm,
+                        asset.policy_decision
                     )
 
+                except Exception as policy_error:
 
-
-            # --------------------------------
-            # Audit Logging
-            # --------------------------------
-
-            if AuditService:
-
-                try:
-
-                    AuditService.create_event(
-
-                        event_type=
-                        "ASSET_DISCOVERY_SCAN",
-
-                        status=
-                        "SUCCESS",
-
-                        details={
-
-                            "hostname":
-                            asset.hostname,
-
-                            "algorithm":
-                            algorithm,
-
-                            "risk":
-                            asset.risk_level
-
-                        }
+                    logger.exception(
+                        "Policy evaluation failed for %s",
+                        algorithm
                     )
 
-
-                except Exception as e:
-
-                    logger.error(
-                        "Audit failed: %s",
-                        e
+                    asset.policy_decision = (
+                        "MANUAL_REVIEW"
                     )
 
+                    asset.migration_required = True
 
+            # ==================================================
+            # 10. Final Asset State
+            # ==================================================
 
             asset.scan_status = "SUCCESS"
 
-            asset.last_scanned = (
-                datetime.utcnow()
-            )
+            asset.last_scanned = datetime.utcnow()
 
             db.session.commit()
 
+            logger.info(
+                "Asset discovery completed successfully: %s",
+                hostname
+            )
 
             return asset
 
-
-
-        except Exception as e:
-
+        except Exception as error:
 
             logger.exception(
-                "Asset discovery failed"
+                "Asset discovery failed for %s:%s",
+                target,
+                port
             )
 
+            db.session.rollback()
 
-            raise e
+            # If an asset was already created, record failure.
+            if asset:
 
+                try:
 
+                    asset.scan_status = "FAILED"
 
-    # --------------------------------
-    # Get Assets
-    # --------------------------------
+                    asset.scan_error = str(
+                        error
+                    )
+
+                    asset.last_scanned = (
+                        datetime.utcnow()
+                    )
+
+                    db.session.add(asset)
+
+                    db.session.commit()
+
+                except Exception:
+
+                    db.session.rollback()
+
+            raise
+
+    # ==========================================================
+    # Get All Assets
+    # ==========================================================
 
     @staticmethod
     def get_assets():
@@ -469,11 +469,9 @@ class AssetDiscoveryService:
             .all()
         )
 
-
-
-    # --------------------------------
+    # ==========================================================
     # Get Single Asset
-    # --------------------------------
+    # ==========================================================
 
     @staticmethod
     def get_asset(asset_id):
@@ -483,11 +481,9 @@ class AssetDiscoveryService:
             .get_or_404(asset_id)
         )
 
-
-
-    # --------------------------------
+    # ==========================================================
     # Delete Asset
-    # --------------------------------
+    # ==========================================================
 
     @staticmethod
     def delete_asset(asset_id):
@@ -503,11 +499,9 @@ class AssetDiscoveryService:
 
         return True
 
-
-
-    # --------------------------------
-    # Rescan
-    # --------------------------------
+    # ==========================================================
+    # Rescan Asset
+    # ==========================================================
 
     @staticmethod
     def rescan(asset_id):
@@ -516,7 +510,6 @@ class AssetDiscoveryService:
             DiscoveredAsset.query
             .get_or_404(asset_id)
         )
-
 
         return AssetDiscoveryService.scan_asset(
             asset.hostname,
