@@ -4,7 +4,9 @@ LABEL org.opencontainers.image.source="https://github.com/naveedurrehman959/ente
 
 WORKDIR /app
 
-
+# Create non-root application user
+RUN groupadd --system appgroup \
+    && useradd --system --gid appgroup --create-home appuser
 COPY requirements.txt .
 
 
@@ -12,8 +14,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 
 COPY . .
-
-
+# Give the application user ownership of the application
+RUN chown -R appuser:appgroup /app
+# Run application as non-root
+USER appuser
 EXPOSE 5001
 
 
