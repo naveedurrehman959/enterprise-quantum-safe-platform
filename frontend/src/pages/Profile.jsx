@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 
 import {
@@ -19,9 +20,7 @@ import SecurityIcon from "@mui/icons-material/Security";
 
 import profileService from "../services/profileService";
 
-
 function Profile() {
-
   const [profile, setProfile] = useState({});
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
@@ -31,380 +30,219 @@ function Profile() {
     new_password: "",
   });
 
-
   useEffect(() => {
-    loadProfile();
+    let cancelled = false;
+
+    const fetchProfile = async () => {
+      try {
+        const data = await profileService.getProfile();
+
+        if (!cancelled) {
+          setProfile(data);
+          setEmail(data.email || "");
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Profile loading failed", error);
+          setMessage("Failed to load profile");
+        }
+      }
+    };
+
+    fetchProfile();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-
-  const loadProfile = async () => {
-
-    try {
-
-      const data =
-        await profileService.getProfile();
-
-      setProfile(data);
-      setEmail(data.email);
-
-    }
-    catch(error){
-
-      console.error(error);
-      setMessage("Failed to load profile");
-
-    }
-
-  };
-
-
-
   const updateEmail = async () => {
-
     try {
-
       await profileService.updateProfile({
         email,
       });
 
-      setMessage(
-        "Email updated successfully"
-      );
+      setMessage("Email updated successfully");
 
-      loadProfile();
-
-    }
-    catch(error){
-
-      console.error(error);
+      const data = await profileService.getProfile();
+      setProfile(data);
+      setEmail(data.email || "");
+    } catch (error) {
+      console.error("Email update failed", error);
       setMessage("Email update failed");
-
     }
-
   };
-
-
 
   const updatePassword = async () => {
-
     try {
+      await profileService.changePassword(password);
 
-      await profileService.changePassword(
-        password
-      );
-
-      setMessage(
-        "Password changed successfully"
-      );
+      setMessage("Password changed successfully");
 
       setPassword({
-        old_password:"",
-        new_password:"",
+        old_password: "",
+        new_password: "",
       });
-
+    } catch (error) {
+      console.error("Password change failed", error);
+      setMessage("Password change failed");
     }
-    catch(error){
-
-      console.error(error);
-      setMessage(
-        "Password change failed"
-      );
-
-    }
-
   };
 
-
-
   return (
-
     <Box>
-
       <Typography
         variant="h4"
-        sx={{mb:3}}
+        sx={{ mb: 3 }}
       >
         User Profile
       </Typography>
 
-
-      {
-        message &&
+      {message && (
         <Alert
           severity="info"
-          sx={{mb:3}}
+          sx={{ mb: 3 }}
         >
           {message}
         </Alert>
-      }
-
-
+      )}
 
       <Grid container spacing={3}>
-
-
-        <Grid size={{xs:12}}>
-
-
+        {/* Profile Information */}
+        <Grid size={{ xs: 12 }}>
           <Card elevation={3}>
-
             <CardContent>
-
-
               <Box
                 display="flex"
                 alignItems="center"
                 gap={3}
               >
-
                 <Avatar
                   sx={{
-                    width:70,
-                    height:70
+                    width: 70,
+                    height: 70,
                   }}
                 >
-
-                  <PersonIcon fontSize="large"/>
-
+                  <PersonIcon fontSize="large" />
                 </Avatar>
 
-
                 <Box>
-
                   <Typography variant="h5">
-
-                    {profile.username}
-
+                    {profile.username || "User"}
                   </Typography>
 
-
-                  <Typography
-                    color="text.secondary"
-                  >
-
-                    {profile.email}
-
+                  <Typography color="text.secondary">
+                    {profile.email || "N/A"}
                   </Typography>
-
 
                   <Chip
-
-                    label={
-                      profile.role ||
-                      "User"
-                    }
-
+                    label={profile.role || "User"}
                     color="primary"
-
-                    sx={{
-                      mt:1
-                    }}
-
+                    sx={{ mt: 1 }}
                   />
-
                 </Box>
-
-
               </Box>
 
-
-              <Divider sx={{my:3}}/>
-
+              <Divider sx={{ my: 3 }} />
 
               <Typography>
-
                 <b>Account Created:</b>{" "}
-
-                {
-                  profile.created_at ||
-                  "N/A"
-                }
-
+                {profile.created_at || "N/A"}
               </Typography>
-
-
             </CardContent>
-
           </Card>
-
-
         </Grid>
 
-
-
-
-
-        <Grid size={{xs:12,md:6}}>
-
-
+        {/* Update Email */}
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={3}>
-
             <CardContent>
-
-
               <Typography
                 variant="h6"
                 gutterBottom
               >
-
                 Update Email
-
               </Typography>
-
-
 
               <TextField
-
                 fullWidth
-
                 label="Email"
-
+                type="email"
                 value={email}
-
-                onChange={
-                  e=>setEmail(e.target.value)
-                }
-
+                onChange={(e) => setEmail(e.target.value)}
               />
 
-
-
               <Button
-
                 variant="contained"
-
-                sx={{mt:2}}
-
+                sx={{ mt: 2 }}
                 onClick={updateEmail}
-
               >
-
                 Save Email
-
               </Button>
-
-
             </CardContent>
-
-
           </Card>
-
-
         </Grid>
 
-
-
-
-
-        <Grid size={{xs:12,md:6}}>
-
-
+        {/* Security */}
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={3}>
-
-
             <CardContent>
-
-
               <Typography
                 variant="h6"
                 gutterBottom
               >
-
                 <SecurityIcon
                   sx={{
-                    verticalAlign:"middle",
-                    mr:1
+                    verticalAlign: "middle",
+                    mr: 1,
                   }}
                 />
 
                 Security
-
               </Typography>
 
-
-
               <TextField
-
                 fullWidth
-
                 type="password"
-
                 label="Current Password"
-
-                value={
-                  password.old_password
-                }
-
-                onChange={
-                  e=>
+                value={password.old_password}
+                onChange={(e) =>
                   setPassword({
                     ...password,
-                    old_password:e.target.value
+                    old_password: e.target.value,
                   })
                 }
-
               />
-
-
 
               <TextField
-
                 fullWidth
-
                 type="password"
-
                 label="New Password"
-
-                sx={{mt:2}}
-
-                value={
-                  password.new_password
-                }
-
-                onChange={
-                  e=>
+                sx={{ mt: 2 }}
+                value={password.new_password}
+                onChange={(e) =>
                   setPassword({
                     ...password,
-                    new_password:e.target.value
+                    new_password: e.target.value,
                   })
                 }
-
               />
-
-
 
               <Button
-
                 variant="contained"
-
-                sx={{mt:2}}
-
+                sx={{ mt: 2 }}
                 onClick={updatePassword}
-
               >
-
                 Change Password
-
               </Button>
-
-
             </CardContent>
-
-
           </Card>
-
-
         </Grid>
-
-
       </Grid>
-
-
     </Box>
-
   );
-
 }
 
-
 export default Profile;
+
+

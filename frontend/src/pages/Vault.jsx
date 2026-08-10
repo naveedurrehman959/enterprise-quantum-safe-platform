@@ -1,227 +1,238 @@
-import {useEffect,useState} from "react";
+import { useEffect, useState } from "react";
 
 import {
- Card,
- CardContent,
- Typography,
- Button,
- TextField,
- Stack,
- Chip
+    Card,
+    CardContent,
+    Typography,
+    Button,
+    TextField,
+    Stack,
+    Chip,
 } from "@mui/material";
-
 
 import vaultService from "../services/vaultService";
 
+function Vault() {
+    const [status, setStatus] = useState(null);
+    const [secrets, setSecrets] = useState([]);
 
-function Vault(){
+    const [secret, setSecret] = useState({
+        secret_name: "",
+        secret_value: "",
+        secret_type: "KEY",
+    });
 
-const [status,setStatus]=useState(null);
-const [secrets,setSecrets]=useState([]);
+    const loadVault = async () => {
+        try {
+            const statusResponse =
+                await vaultService.getStatus();
 
-const [secret,setSecret]=useState({
- secret_name:"",
- secret_value:"",
- secret_type:"KEY"
-});
+            setStatus(statusResponse.data);
 
+            const secretsResponse =
+                await vaultService.listSecrets();
 
-const loadVault=async()=>{
+            setSecrets(
+                secretsResponse.data.secrets || []
+            );
+        } catch (error) {
+            console.error(
+                "Vault loading failed",
+                error
+            );
+        }
+    };
 
-try{
+    useEffect(() => {
+        let cancelled = false;
 
-const s =
-await vaultService.getStatus();
+        const loadInitialVault = async () => {
+            try {
+                const statusResponse =
+                    await vaultService.getStatus();
 
-setStatus(s.data);
+                const secretsResponse =
+                    await vaultService.listSecrets();
 
+                if (!cancelled) {
+                    setStatus(statusResponse.data);
 
-const l =
-await vaultService.listSecrets();
+                    setSecrets(
+                        secretsResponse.data.secrets || []
+                    );
+                }
+            } catch (error) {
+                if (!cancelled) {
+                    console.error(
+                        "Vault loading failed",
+                        error
+                    );
+                }
+            }
+        };
 
-setSecrets(
-l.data.secrets || []
-);
+        loadInitialVault();
 
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
+    const store = async () => {
+        try {
+            await vaultService.storeSecret(secret);
+
+            setSecret({
+                secret_name: "",
+                secret_value: "",
+                secret_type: "KEY",
+            });
+
+            await loadVault();
+        } catch (error) {
+            console.error(
+                "Secret storage failed",
+                error
+            );
+        }
+    };
+
+    return (
+        <>
+            <Typography
+                variant="h4"
+                sx={{ mb: 3 }}
+            >
+                Enterprise Vault
+            </Typography>
+
+            {status && (
+                <Card
+                    elevation={3}
+                    sx={{ mb: 3 }}
+                >
+                    <CardContent>
+                        <Stack
+                            direction="row"
+                            spacing={2}
+                            alignItems="center"
+                        >
+                            <Typography>
+                                Vault Status
+                            </Typography>
+
+                            <Chip
+                                label={
+                                    status.status ||
+                                    status.health ||
+                                    "Available"
+                                }
+                                color="success"
+                            />
+                        </Stack>
+                    </CardContent>
+                </Card>
+            )}
+
+            <Card elevation={3}>
+                <CardContent>
+                    <Typography
+                        variant="h6"
+                        sx={{ mb: 3 }}
+                    >
+                        Store Secret
+                    </Typography>
+
+                    <Stack spacing={2}>
+                        <TextField
+                            label="Secret Name"
+                            value={secret.secret_name}
+                            onChange={(event) =>
+                                setSecret({
+                                    ...secret,
+                                    secret_name:
+                                        event.target.value,
+                                })
+                            }
+                            fullWidth
+                        />
+
+                        <TextField
+                            label="Secret Value"
+                            type="password"
+                            value={secret.secret_value}
+                            onChange={(event) =>
+                                setSecret({
+                                    ...secret,
+                                    secret_value:
+                                        event.target.value,
+                                })
+                            }
+                            fullWidth
+                        />
+
+                        <Button
+                            variant="contained"
+                            onClick={store}
+                        >
+                            Store Secret
+                        </Button>
+                    </Stack>
+                </CardContent>
+            </Card>
+
+            <Card
+                elevation={3}
+                sx={{ mt: 3 }}
+            >
+                <CardContent>
+                    <Typography
+                        variant="h6"
+                        sx={{ mb: 2 }}
+                    >
+                        Stored Secrets
+                    </Typography>
+
+                    {secrets.length === 0 ? (
+                        <Typography
+                            color="text.secondary"
+                        >
+                            No secrets found.
+                        </Typography>
+                    ) : (
+                        <Stack spacing={1}>
+                            {secrets.map((item) => (
+                                <Card
+                                    key={
+                                        item.id ||
+                                        item.secret_name
+                                    }
+                                    variant="outlined"
+                                >
+                                    <CardContent>
+                                        <Typography>
+                                            {item.secret_name ||
+                                                item.name ||
+                                                "Unnamed Secret"}
+                                        </Typography>
+
+                                        <Chip
+                                            label={
+                                                item.secret_type ||
+                                                "KEY"
+                                            }
+                                            size="small"
+                                            sx={{ mt: 1 }}
+                                        />
+                                    </CardContent>
+                                </Card>
+                            ))}
+                        </Stack>
+                    )}
+                </CardContent>
+            </Card>
+        </>
+    );
 }
-catch(err){
-
-console.error(err);
-
-}
-
-};
-
-
-
-useEffect(()=>{
-
-loadVault();
-
-},[]);
-
-
-
-const store=async()=>{
-
-await vaultService.storeSecret(secret);
-
-setSecret({
- secret_name:"",
- secret_value:"",
- secret_type:"KEY"
-});
-
-loadVault();
-
-};
-
-
-
-return(
-
-<>
-
-
-<Typography
-variant="h4"
-sx={{mb:3}}
->
-Enterprise Vault
-</Typography>
-
-
-
-{
-status &&
-
-<Card sx={{mb:3}}>
-
-<CardContent>
-
-<Typography variant="h6">
-Vault Status
-</Typography>
-
-
-<Chip
-label={status.status}
-color="success"
-/>
-
-
-<Typography sx={{mt:2}}>
-Encryption: {status.encryption}
-</Typography>
-
-
-<Typography>
-Key Management: {status.key_management}
-</Typography>
-
-
-</CardContent>
-
-</Card>
-
-}
-
-
-
-<Card>
-
-<CardContent>
-
-
-<Typography variant="h6">
-Store Secret
-</Typography>
-
-
-
-<Stack spacing={2} sx={{mt:2}}>
-
-
-<TextField
-label="Secret Name"
-value={secret.secret_name}
-onChange={
-e=>setSecret({
-...secret,
-secret_name:e.target.value
-})
-}
-/>
-
-
-
-<TextField
-label="Secret Value"
-type="password"
-value={secret.secret_value}
-onChange={
-e=>setSecret({
-...secret,
-secret_value:e.target.value
-})
-}
-/>
-
-
-
-<Button
-variant="contained"
-onClick={store}
->
-Store Secret
-</Button>
-
-
-</Stack>
-
-
-</CardContent>
-
-</Card>
-
-
-
-<Card sx={{mt:3}}>
-
-<CardContent>
-
-
-<Typography variant="h6">
-Secret Inventory
-</Typography>
-
-
-{
-secrets.map((s)=>(
-
-<Chip
-key={s}
-label={s}
-sx={{m:1}}
-/>
-
-))
-
-}
-
-
-</CardContent>
-
-</Card>
-
-
-
-</>
-
-);
-
-}
-
 
 export default Vault;

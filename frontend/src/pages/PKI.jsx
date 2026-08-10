@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 
 import {
@@ -33,7 +34,6 @@ import AddIcon from "@mui/icons-material/Add";
 import pkiService from "../services/pkiService";
 
 function PKI() {
-
   const [loading, setLoading] = useState(true);
 
   const [certificates, setCertificates] = useState([]);
@@ -50,35 +50,69 @@ function PKI() {
     severity: "success",
   });
 
+  /*
+   * ============================================================
+   * Load Certificates
+   * ============================================================
+   *
+   * The initial API call is kept inside the effect so the
+   * setState operations are performed asynchronously after
+   * the API response.
+   */
   useEffect(() => {
-    loadCertificates();
+    let cancelled = false;
+
+    const fetchCertificates = async () => {
+      try {
+        const response = await pkiService.getCertificates();
+
+        if (cancelled) {
+          return;
+        }
+
+        setCertificates(response.data.certificates || []);
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Certificate loading failed:", error);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchCertificates();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const loadCertificates = async () => {
-
+  /*
+   * ============================================================
+   * Refresh Certificates
+   * ============================================================
+   *
+   * Used after issuing or revoking a certificate.
+   */
+  const refreshCertificates = async () => {
     try {
+      const response = await pkiService.getCertificates();
 
-      const response =
-        await pkiService.getCertificates();
-
-      setCertificates(
-        response.data.certificates || []
-      );
-
+      setCertificates(response.data.certificates || []);
     } catch (error) {
-
-      console.error(error);
-
+      console.error("Certificate refresh failed:", error);
     }
-
-    setLoading(false);
-
   };
 
+  /*
+   * ============================================================
+   * Issue Certificate
+   * ============================================================
+   */
   const issueCertificate = async () => {
-
     try {
-
       await pkiService.issueCertificate({
         type,
         algorithm,
@@ -86,97 +120,102 @@ function PKI() {
 
       setDialogOpen(false);
 
-      await loadCertificates();
+      await refreshCertificates();
 
       setSnackbar({
         open: true,
         severity: "success",
         message: "Certificate issued successfully.",
       });
-
     } catch (error) {
-
-      console.error(error);
+      console.error("Certificate issuance failed:", error);
 
       setSnackbar({
         open: true,
         severity: "error",
         message: "Certificate issuance failed.",
       });
-
     }
-
   };
 
+  /*
+   * ============================================================
+   * Revoke Certificate
+   * ============================================================
+   */
   const revokeCertificate = async (serial) => {
-
     try {
-
       await pkiService.revokeCertificate(serial);
 
-      await loadCertificates();
+      await refreshCertificates();
 
       setSnackbar({
         open: true,
         severity: "success",
         message: "Certificate revoked successfully.",
       });
-
     } catch (error) {
-
-      console.error(error);
+      console.error("Certificate revocation failed:", error);
 
       setSnackbar({
         open: true,
         severity: "error",
         message: "Unable to revoke certificate.",
       });
-
     }
-
   };
 
+  /*
+   * ============================================================
+   * Loading State
+   * ============================================================
+   */
   if (loading) {
-
     return (
-
       <Box
         display="flex"
         justifyContent="center"
-        mt={10}
+        alignItems="center"
+        minHeight="60vh"
       >
         <CircularProgress />
       </Box>
-
     );
-
   }
 
-  const totalCertificates =
-    certificates.length;
+  /*
+   * ============================================================
+   * Certificate Metrics
+   * ============================================================
+   */
 
-  const activeCertificates =
-    certificates.filter(
-      c => c.status === "active"
-    ).length;
+  const totalCertificates = certificates.length;
 
-  const revokedCertificates =
-    certificates.filter(
-      c => c.status === "revoked"
-    ).length;
+  const activeCertificates = certificates.filter(
+    (certificate) => certificate.status === "active"
+  ).length;
 
-  const pqcCertificates =
-    certificates.filter(
-      c => c.algorithm?.includes("ML")
-    ).length;
+  const revokedCertificates = certificates.filter(
+    (certificate) => certificate.status === "revoked"
+  ).length;
 
-  const riskyCertificates =
-    certificates.filter(
-      c => c.quantum_risk !== "SAFE"
-    ).length;
+  const pqcCertificates = certificates.filter(
+    (certificate) =>
+      certificate.algorithm?.includes("ML")
+  ).length;
+
+  const riskyCertificates = certificates.filter(
+    (certificate) =>
+      certificate.quantum_risk !== "SAFE"
+  ).length;
+
+  /*
+   * ============================================================
+   * DataGrid Columns
+   * ============================================================
+   */
 
   const columns = [
-
     {
       field: "id",
       headerName: "ID",
@@ -187,15 +226,16 @@ function PKI() {
       field: "type",
       headerName: "Certificate Type",
       flex: 1,
+      minWidth: 170,
     },
 
     {
       field: "algorithm",
       headerName: "Algorithm",
       flex: 1,
+      minWidth: 150,
 
       renderCell: (params) => (
-
         <Chip
           label={params.value || "Unknown"}
           color={
@@ -205,9 +245,7 @@ function PKI() {
           }
           size="small"
         />
-
       ),
-
     },
 
     {
@@ -216,21 +254,18 @@ function PKI() {
       width: 150,
 
       renderCell: (params) => (
-
         <Chip
           label={params.value || "UNKNOWN"}
           color={
             params.value === "SAFE"
               ? "success"
               : params.value === "LOW"
-              ? "info"
-              : "error"
+                ? "info"
+                : "error"
           }
           size="small"
         />
-
       ),
-
     },
 
     {
@@ -239,9 +274,8 @@ function PKI() {
       width: 140,
 
       renderCell: (params) => (
-
         <Chip
-          label={params.value}
+          label={params.value || "UNKNOWN"}
           color={
             params.value === "active"
               ? "success"
@@ -249,9 +283,7 @@ function PKI() {
           }
           size="small"
         />
-
       ),
-
     },
 
     {
@@ -260,7 +292,6 @@ function PKI() {
       width: 160,
 
       renderCell: (params) => (
-
         <Chip
           label={params.value || "Pending"}
           color={
@@ -270,9 +301,7 @@ function PKI() {
           }
           size="small"
         />
-
       ),
-
     },
 
     {
@@ -282,7 +311,6 @@ function PKI() {
       sortable: false,
 
       renderCell: (params) => (
-
         <Button
           color="error"
           size="small"
@@ -290,20 +318,25 @@ function PKI() {
           onClick={() =>
             revokeCertificate(params.row.serial)
           }
+          disabled={
+            !params.row.serial ||
+            params.row.status === "revoked"
+          }
         >
           Revoke
         </Button>
-
       ),
-
     },
-
   ];
 
-   return (
+  /*
+   * ============================================================
+   * Render
+   * ============================================================
+   */
 
+  return (
     <Box>
-
       <Typography
         variant="h4"
         fontWeight="bold"
@@ -320,12 +353,15 @@ function PKI() {
         Lifecycle Management and Crypto-Agility
       </Typography>
 
+      {/* ======================================================
+          Metrics
+          ====================================================== */}
+
       <Grid
         container
         spacing={3}
       >
-
-        <Grid size={{ xs: 12, md: 2.4 }}>
+        <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
           <MetricCard
             title="Certificates"
             value={totalCertificates}
@@ -333,7 +369,7 @@ function PKI() {
           />
         </Grid>
 
-        <Grid size={{ xs: 12, md: 2.4 }}>
+        <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
           <MetricCard
             title="Active"
             value={activeCertificates}
@@ -341,7 +377,7 @@ function PKI() {
           />
         </Grid>
 
-        <Grid size={{ xs: 12, md: 2.4 }}>
+        <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
           <MetricCard
             title="PQC"
             value={pqcCertificates}
@@ -349,7 +385,7 @@ function PKI() {
           />
         </Grid>
 
-        <Grid size={{ xs: 12, md: 2.4 }}>
+        <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
           <MetricCard
             title="Quantum Risk"
             value={riskyCertificates}
@@ -357,28 +393,31 @@ function PKI() {
           />
         </Grid>
 
-        <Grid size={{ xs: 12, md: 2.4 }}>
+        <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
           <MetricCard
             title="Revoked"
             value={revokedCertificates}
             icon={<DeleteForeverIcon />}
           />
         </Grid>
-
       </Grid>
+
+      {/* ======================================================
+          PKI Content
+          ====================================================== */}
 
       <Grid
         container
         spacing={3}
         sx={{ mt: 1 }}
       >
+        {/* ====================================================
+            Certificate Authority
+            ==================================================== */}
 
         <Grid size={{ xs: 12, md: 4 }}>
-
           <Card>
-
             <CardContent>
-
               <Typography
                 variant="h6"
                 gutterBottom
@@ -386,10 +425,9 @@ function PKI() {
                 Certificate Authority
               </Typography>
 
-              <Divider sx={{ mb:2 }} />
+              <Divider sx={{ mb: 2 }} />
 
               <Stack spacing={2}>
-
                 <Chip
                   label="CA Status : Healthy"
                   color="success"
@@ -409,10 +447,9 @@ function PKI() {
                   label={`Issued Certificates : ${totalCertificates}`}
                   color="info"
                 />
-
               </Stack>
 
-              <Divider sx={{ my:3 }} />
+              <Divider sx={{ my: 3 }} />
 
               <Typography
                 variant="body2"
@@ -423,26 +460,30 @@ function PKI() {
                 ML-DSA algorithms for quantum-safe identity
                 protection.
               </Typography>
-
             </CardContent>
-
           </Card>
-
         </Grid>
 
-        <Grid size={{ xs:12, md:8 }}>
+        {/* ====================================================
+            Certificate Inventory
+            ==================================================== */}
 
+        <Grid size={{ xs: 12, md: 8 }}>
           <Card>
-
             <CardContent>
-
               <Stack
-                direction="row"
+                direction={{
+                  xs: "column",
+                  sm: "row",
+                }}
                 justifyContent="space-between"
-                alignItems="center"
+                alignItems={{
+                  xs: "stretch",
+                  sm: "center",
+                }}
+                spacing={2}
                 mb={2}
               >
-
                 <Typography variant="h6">
                   Certificate Inventory
                 </Typography>
@@ -456,63 +497,62 @@ function PKI() {
                 >
                   Issue Certificate
                 </Button>
-
               </Stack>
 
-              <Divider sx={{ mb:2 }} />
+              <Divider sx={{ mb: 2 }} />
 
               <Box
                 sx={{
-                  height:520
+                  height: 520,
+                  width: "100%",
                 }}
               >
-
                 <DataGrid
-
                   rows={certificates}
-
                   columns={columns}
-
-                  pageSizeOptions={[5,10]}
-
+                  pageSizeOptions={[5, 10, 25]}
+                  initialState={{
+                    pagination: {
+                      paginationModel: {
+                        pageSize: 10,
+                        page: 0,
+                      },
+                    },
+                  }}
                   disableRowSelectionOnClick
-
+                  sx={{
+                    border: 0,
+                  }}
                 />
-
               </Box>
-
             </CardContent>
-
           </Card>
-
         </Grid>
-
       </Grid>
 
+      {/* ======================================================
+          Issue Certificate Dialog
+          ====================================================== */}
 
       <Dialog
         open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
+        onClose={() =>
+          setDialogOpen(false)
+        }
         maxWidth="sm"
         fullWidth
       >
-
         <DialogTitle>
-
           Issue Post-Quantum Certificate
-
         </DialogTitle>
 
         <DialogContent>
-
           <Typography
             color="text.secondary"
             sx={{ mb: 3 }}
           >
-
             Generate enterprise-ready certificates using
             NIST standardized ML-DSA algorithms.
-
           </Typography>
 
           <Typography
@@ -525,12 +565,11 @@ function PKI() {
           <Select
             fullWidth
             value={type}
-            onChange={(e) =>
-              setType(e.target.value)
+            onChange={(event) =>
+              setType(event.target.value)
             }
             sx={{ mb: 3 }}
           >
-
             <MenuItem value="PQC-SERVER">
               PQC Server Certificate
             </MenuItem>
@@ -538,7 +577,6 @@ function PKI() {
             <MenuItem value="PQC-CLIENT">
               PQC Client Certificate
             </MenuItem>
-
           </Select>
 
           <Typography
@@ -551,11 +589,10 @@ function PKI() {
           <Select
             fullWidth
             value={algorithm}
-            onChange={(e) =>
-              setAlgorithm(e.target.value)
+            onChange={(event) =>
+              setAlgorithm(event.target.value)
             }
           >
-
             <MenuItem value="ML-DSA-44">
               ML-DSA-44
             </MenuItem>
@@ -567,13 +604,10 @@ function PKI() {
             <MenuItem value="ML-DSA-87">
               ML-DSA-87
             </MenuItem>
-
           </Select>
-
         </DialogContent>
 
         <DialogActions>
-
           <Button
             onClick={() =>
               setDialogOpen(false)
@@ -588,68 +622,65 @@ function PKI() {
           >
             Issue Certificate
           </Button>
-
         </DialogActions>
-
       </Dialog>
+
+      {/* ======================================================
+          Notifications
+          ====================================================== */}
 
       <Snackbar
         open={snackbar.open}
         autoHideDuration={3000}
         onClose={() =>
-          setSnackbar({
-            ...snackbar,
+          setSnackbar((current) => ({
+            ...current,
             open: false,
-          })
+          }))
         }
       >
-
         <Alert
           severity={snackbar.severity}
           variant="filled"
+          onClose={() =>
+            setSnackbar((current) => ({
+              ...current,
+              open: false,
+            }))
+          }
         >
-
           {snackbar.message}
-
         </Alert>
-
       </Snackbar>
-
     </Box>
-
   );
-
 }
 
+/*
+ * ============================================================
+ * Metric Card
+ * ============================================================
+ */
+
 function MetricCard({
-
   title,
-
   value,
-
   icon,
-
 }) {
-
   return (
-
     <Card
       elevation={3}
       sx={{
         height: "100%",
       }}
     >
-
       <CardContent>
-
         <Stack
           direction="row"
           justifyContent="space-between"
           alignItems="center"
         >
-
           <Box>
-
             <Typography
               color="text.secondary"
               variant="body2"
@@ -664,7 +695,6 @@ function MetricCard({
             >
               {value}
             </Typography>
-
           </Box>
 
           <Box
@@ -674,15 +704,10 @@ function MetricCard({
           >
             {icon}
           </Box>
-
         </Stack>
-
       </CardContent>
-
     </Card>
-
   );
-
 }
 
 export default PKI;

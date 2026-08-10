@@ -1,6 +1,5 @@
 import { Navigate, useLocation } from "react-router-dom";
-
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../context/useAuth";
 import { ROLE_PERMISSIONS } from "../utils/roles";
 
 function RoleRoute({ children }) {

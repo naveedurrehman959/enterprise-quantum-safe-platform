@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 
 import {
@@ -35,9 +36,7 @@ import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 import migrationService from "../services/migrationService";
 
-
 function Risk() {
-
   const navigate = useNavigate();
 
   // ============================================================
@@ -64,67 +63,60 @@ function Risk() {
     severity: "success",
   });
 
-
   // ============================================================
-  // Load Risk Dashboard
+  // Initial Risk Assessment
   // ============================================================
 
   useEffect(() => {
+    let cancelled = false;
 
-    loadRiskAssessment();
+    const fetchRiskAssessment = async () => {
+      try {
+        const response = await api.get("/risk/assessment");
 
+        if (!cancelled) {
+          setRisk(response.data);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error(
+            "Risk assessment error:",
+            error
+          );
+
+          setSnackbar({
+            open: true,
+            message: "Unable to load risk assessment.",
+            severity: "error",
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchRiskAssessment();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
-
-
-  const loadRiskAssessment = async () => {
-
-    try {
-
-      const response = await api.get(
-        "/risk/assessment"
-      );
-
-      setRisk(response.data);
-
-    } catch (error) {
-
-      console.error(
-        "Risk assessment error:",
-        error
-      );
-
-      setSnackbar({
-        open: true,
-        message:
-          "Unable to load risk assessment.",
-        severity: "error",
-      });
-
-    } finally {
-
-      setLoading(false);
-
-    }
-
-  };
-
 
   // ============================================================
   // Analyze Algorithm
   // ============================================================
 
   const analyzeRisk = async () => {
-
     setAnalyzing(true);
-
     setPlan(null);
 
     try {
-
       const response = await api.post(
         "/risk/analyze",
         {
-          algorithm: algorithm,
+          algorithm,
         }
       );
 
@@ -132,13 +124,10 @@ function Risk() {
 
       setSnackbar({
         open: true,
-        message:
-          `${algorithm} risk analysis completed.`,
+        message: `${algorithm} risk analysis completed.`,
         severity: "success",
       });
-
     } catch (error) {
-
       console.error(
         "Algorithm analysis error:",
         error
@@ -146,26 +135,19 @@ function Risk() {
 
       setSnackbar({
         open: true,
-        message:
-          "Algorithm risk analysis failed.",
+        message: "Algorithm risk analysis failed.",
         severity: "error",
       });
-
     } finally {
-
       setAnalyzing(false);
-
     }
-
   };
-
 
   // ============================================================
   // Generate Migration Plan
   // ============================================================
 
   const generateMigrationPlan = async () => {
-
     if (!analysis) {
       return;
     }
@@ -173,7 +155,6 @@ function Risk() {
     setGeneratingPlan(true);
 
     try {
-
       const response =
         await migrationService.createPlan(
           analysis.algorithm
@@ -183,13 +164,10 @@ function Risk() {
 
       setSnackbar({
         open: true,
-        message:
-          "Migration plan generated successfully.",
+        message: "Migration plan generated successfully.",
         severity: "success",
       });
-
     } catch (error) {
-
       console.error(
         "Migration plan error:",
         error
@@ -197,55 +175,38 @@ function Risk() {
 
       setSnackbar({
         open: true,
-        message:
-          "Unable to generate migration plan.",
+        message: "Unable to generate migration plan.",
         severity: "error",
       });
-
     } finally {
-
       setGeneratingPlan(false);
-
     }
-
   };
-
 
   // ============================================================
   // Loading
   // ============================================================
 
   if (loading) {
-
     return (
-
       <Box
         display="flex"
         justifyContent="center"
         alignItems="center"
         minHeight="400px"
       >
-
         <CircularProgress />
-
       </Box>
-
     );
-
   }
-
 
   // ============================================================
   // Risk Level Helpers
   // ============================================================
 
   const getRiskColor = (level) => {
-
     switch (level) {
-
       case "CRITICAL":
-        return "error";
-
       case "HIGH":
         return "error";
 
@@ -260,16 +221,11 @@ function Risk() {
 
       default:
         return "default";
-
     }
-
   };
 
-
   const getDecisionColor = (decision) => {
-
     switch (decision) {
-
       case "APPROVED":
         return "success";
 
@@ -281,20 +237,15 @@ function Risk() {
 
       default:
         return "default";
-
     }
-
   };
-
 
   // ============================================================
   // Render
   // ============================================================
 
   return (
-
     <Box>
-
       {/* ======================================================
           Header
       ====================================================== */}
@@ -316,16 +267,11 @@ function Risk() {
         recommendations.
       </Typography>
 
-
       {/* ======================================================
           Risk Summary
       ====================================================== */}
 
-      <Grid
-        container
-        spacing={2}
-      >
-
+      <Grid container spacing={2}>
         <MetricCard
           title="Total Assets"
           value={risk?.total_assets ?? 0}
@@ -355,9 +301,7 @@ function Risk() {
           value={risk?.critical_risk ?? 0}
           icon={<ErrorIcon />}
         />
-
       </Grid>
-
 
       {/* ======================================================
           Quantum Readiness
@@ -367,9 +311,7 @@ function Risk() {
         elevation={3}
         sx={{ mt: 2 }}
       >
-
         <CardContent>
-
           <Typography
             variant="subtitle1"
             fontWeight="500"
@@ -393,11 +335,8 @@ function Risk() {
             score based on current cryptographic
             inventory.
           </Typography>
-
         </CardContent>
-
       </Card>
-
 
       {/* ======================================================
           Cryptographic Risk Analysis
@@ -407,9 +346,7 @@ function Risk() {
         elevation={3}
         sx={{ mt: 2 }}
       >
-
         <CardContent>
-
           <Typography
             variant="h6"
             gutterBottom
@@ -427,7 +364,6 @@ function Risk() {
             database.
           </Typography>
 
-
           <Stack
             direction={{
               xs: "column",
@@ -439,13 +375,11 @@ function Risk() {
               sm: "center",
             }}
           >
-
             <FormControl
               sx={{
                 minWidth: 220,
               }}
             >
-
               <InputLabel>
                 Algorithm
               </InputLabel>
@@ -454,17 +388,14 @@ function Risk() {
                 value={algorithm}
                 label="Algorithm"
                 onChange={(event) => {
-
                   setAlgorithm(
                     event.target.value
                   );
 
                   setAnalysis(null);
                   setPlan(null);
-
                 }}
               >
-
                 <MenuItem value="RSA-1024">
                   RSA-1024
                 </MenuItem>
@@ -512,21 +443,20 @@ function Risk() {
                 <MenuItem value="ML-DSA-65">
                   ML-DSA-65
                 </MenuItem>
-
               </Select>
-
             </FormControl>
-
 
             <Button
               variant="contained"
               startIcon={
-                analyzing
-                  ? <CircularProgress
-                      size={18}
-                      color="inherit"
-                    />
-                  : <SecurityIcon />
+                analyzing ? (
+                  <CircularProgress
+                    size={18}
+                    color="inherit"
+                  />
+                ) : (
+                  <SecurityIcon />
+                )
               }
               onClick={analyzeRisk}
               disabled={analyzing}
@@ -535,27 +465,20 @@ function Risk() {
                 ? "Analyzing..."
                 : "Analyze Risk"}
             </Button>
-
           </Stack>
-
         </CardContent>
-
       </Card>
-
 
       {/* ======================================================
           Analysis Result
       ====================================================== */}
 
       {analysis && (
-
         <Card
           elevation={3}
           sx={{ mt: 2 }}
         >
-
           <CardContent>
-
             <Typography
               variant="h6"
               gutterBottom
@@ -565,29 +488,16 @@ function Risk() {
 
             <Divider sx={{ mb: 3 }} />
 
-
-            <Grid
-              container
-              spacing={3}
-            >
-
-              {/* Algorithm */}
-
+            <Grid container spacing={3}>
               <ResultItem
                 label="Algorithm"
                 value={analysis.algorithm}
               />
 
-
-              {/* Risk Score */}
-
               <ResultItem
                 label="Risk Score"
                 value={`${analysis.risk_score} / 100`}
               />
-
-
-              {/* Risk Level */}
 
               <Grid
                 size={{
@@ -596,7 +506,6 @@ function Risk() {
                   md: 3,
                 }}
               >
-
                 <Typography
                   variant="caption"
                   color="text.secondary"
@@ -605,30 +514,24 @@ function Risk() {
                 </Typography>
 
                 <Box sx={{ mt: 1 }}>
-
                   <Chip
                     icon={
                       analysis.risk_level ===
-                      "SAFE"
-                        ? <CheckCircleIcon />
-                        : <WarningIcon />
+                      "SAFE" ? (
+                        <CheckCircleIcon />
+                      ) : (
+                        <WarningIcon />
+                      )
                     }
                     label={
                       analysis.risk_level
                     }
-                    color={
-                      getRiskColor(
-                        analysis.risk_level
-                      )
-                    }
+                    color={getRiskColor(
+                      analysis.risk_level
+                    )}
                   />
-
                 </Box>
-
               </Grid>
-
-
-              {/* Decision */}
 
               <Grid
                 size={{
@@ -637,7 +540,6 @@ function Risk() {
                   md: 3,
                 }}
               >
-
                 <Typography
                   variant="caption"
                   color="text.secondary"
@@ -646,24 +548,16 @@ function Risk() {
                 </Typography>
 
                 <Box sx={{ mt: 1 }}>
-
                   <Chip
                     label={
                       analysis.decision
                     }
-                    color={
-                      getDecisionColor(
-                        analysis.decision
-                      )
-                    }
+                    color={getDecisionColor(
+                      analysis.decision
+                    )}
                   />
-
                 </Box>
-
               </Grid>
-
-
-              {/* Quantum Vulnerability */}
 
               <ResultItem
                 label="Quantum Vulnerable"
@@ -674,9 +568,6 @@ function Risk() {
                 }
               />
 
-
-              {/* Migration */}
-
               <ResultItem
                 label="Migration Required"
                 value={
@@ -685,15 +576,9 @@ function Risk() {
                     : "NO"
                 }
               />
-
-
             </Grid>
 
-
-            {/* Recommendation */}
-
             <Box sx={{ mt: 3 }}>
-
               <Alert
                 severity={
                   analysis.migration_required
@@ -701,22 +586,14 @@ function Risk() {
                     : "success"
                 }
               >
-
                 <strong>
                   Recommendation:
                 </strong>{" "}
-
                 {analysis.recommendation}
-
               </Alert>
-
             </Box>
 
-
-            {/* Recommended Algorithm */}
-
             <Box sx={{ mt: 3 }}>
-
               <Typography
                 variant="caption"
                 color="text.secondary"
@@ -731,18 +608,10 @@ function Risk() {
                 {analysis.recommended_algorithm ||
                   "No migration required"}
               </Typography>
-
             </Box>
 
-
-            {/* =================================================
-                Migration Button
-            ================================================= */}
-
             {analysis.migration_required && (
-
               <Box sx={{ mt: 3 }}>
-
                 <Divider sx={{ mb: 3 }} />
 
                 <Stack
@@ -752,34 +621,33 @@ function Risk() {
                   }}
                   spacing={2}
                 >
-
                   <Button
                     variant="contained"
                     color="warning"
                     startIcon={
-                      generatingPlan
-                        ? <CircularProgress
-                            size={18}
-                            color="inherit"
-                          />
-                        : <MigrationIcon />
+                      generatingPlan ? (
+                        <CircularProgress
+                          size={18}
+                          color="inherit"
+                        />
+                      ) : (
+                        <MigrationIcon />
+                      )
                     }
                     endIcon={
-                      !generatingPlan &&
-                      <ArrowForwardIcon />
+                      !generatingPlan && (
+                        <ArrowForwardIcon />
+                      )
                     }
                     onClick={
                       generateMigrationPlan
                     }
                     disabled={generatingPlan}
                   >
-
                     {generatingPlan
                       ? "Generating Plan..."
                       : "Generate Migration Plan"}
-
                   </Button>
-
 
                   <Button
                     variant="outlined"
@@ -789,33 +657,23 @@ function Risk() {
                   >
                     Open Migration Engine
                   </Button>
-
                 </Stack>
-
               </Box>
-
             )}
-
           </CardContent>
-
         </Card>
-
       )}
-
 
       {/* ======================================================
           Migration Plan
       ====================================================== */}
 
       {plan && (
-
         <Card
           elevation={3}
           sx={{ mt: 2 }}
         >
-
           <CardContent>
-
             <Stack
               direction={{
                 xs: "column",
@@ -828,9 +686,7 @@ function Risk() {
               }}
               spacing={2}
             >
-
               <Box>
-
                 <Typography
                   variant="h6"
                   gutterBottom
@@ -845,7 +701,6 @@ function Risk() {
                   Generated by the Enterprise
                   Migration Engine.
                 </Typography>
-
               </Box>
 
               <Chip
@@ -855,18 +710,11 @@ function Risk() {
                 }
                 color="success"
               />
-
             </Stack>
-
 
             <Divider sx={{ my: 3 }} />
 
-
-            <Grid
-              container
-              spacing={3}
-            >
-
+            <Grid container spacing={3}>
               <ResultItem
                 label="Source Algorithm"
                 value={
@@ -875,7 +723,6 @@ function Risk() {
                 }
               />
 
-
               <ResultItem
                 label="Algorithm Category"
                 value={
@@ -883,7 +730,6 @@ function Risk() {
                   "Cryptographic Algorithm"
                 }
               />
-
 
               <ResultItem
                 label="Target Algorithm"
@@ -899,14 +745,9 @@ function Risk() {
                       "PQC Migration"
                 }
               />
-
             </Grid>
 
-
-            {/* Migration Steps */}
-
             <Box sx={{ mt: 4 }}>
-
               <Typography
                 variant="subtitle1"
                 fontWeight="bold"
@@ -915,14 +756,9 @@ function Risk() {
                 Migration Steps
               </Typography>
 
-
               <Stack spacing={1.5}>
-
-                {(
-                  plan.migration_steps || []
-                ).map(
+                {(plan.migration_steps || []).map(
                   (step, index) => (
-
                     <Paper
                       key={index}
                       variant="outlined"
@@ -933,7 +769,6 @@ function Risk() {
                         gap: 2,
                       }}
                     >
-
                       <Chip
                         label={index + 1}
                         size="small"
@@ -943,33 +778,22 @@ function Risk() {
                       <Typography>
                         {step}
                       </Typography>
-
                     </Paper>
-
                   )
                 )}
-
               </Stack>
-
             </Box>
-
-
-            {/* Migration Status */}
 
             <Alert
               severity="success"
               icon={<MigrationIcon />}
               sx={{ mt: 3 }}
             >
-
               Migration plan is ready for
               implementation.
-
             </Alert>
 
-
             <Box sx={{ mt: 3 }}>
-
               <Button
                 variant="outlined"
                 startIcon={<MigrationIcon />}
@@ -979,15 +803,10 @@ function Risk() {
               >
                 Continue in Migration Engine
               </Button>
-
             </Box>
-
           </CardContent>
-
         </Card>
-
       )}
-
 
       {/* ======================================================
           Snackbar
@@ -1003,7 +822,6 @@ function Risk() {
           })
         }
       >
-
         <Alert
           severity={snackbar.severity}
           variant="filled"
@@ -1016,15 +834,10 @@ function Risk() {
         >
           {snackbar.message}
         </Alert>
-
       </Snackbar>
-
     </Box>
-
   );
-
 }
-
 
 // ============================================================
 // Metric Card
@@ -1035,9 +848,7 @@ function MetricCard({
   value,
   icon,
 }) {
-
   return (
-
     <Grid
       size={{
         xs: 12,
@@ -1045,24 +856,19 @@ function MetricCard({
         md: 2.4,
       }}
     >
-
       <Card
         elevation={3}
         sx={{
           height: "100%",
         }}
       >
-
         <CardContent>
-
           <Stack
             direction="row"
             justifyContent="space-between"
             alignItems="center"
           >
-
             <Box>
-
               <Typography
                 variant="body2"
                 color="text.secondary"
@@ -1077,7 +883,6 @@ function MetricCard({
               >
                 {value}
               </Typography>
-
             </Box>
 
             <Box
@@ -1087,19 +892,12 @@ function MetricCard({
             >
               {icon}
             </Box>
-
           </Stack>
-
         </CardContent>
-
       </Card>
-
     </Grid>
-
   );
-
 }
-
 
 // ============================================================
 // Result Item
@@ -1109,9 +907,7 @@ function ResultItem({
   label,
   value,
 }) {
-
   return (
-
     <Grid
       size={{
         xs: 12,
@@ -1119,7 +915,6 @@ function ResultItem({
         md: 3,
       }}
     >
-
       <Typography
         variant="caption"
         color="text.secondary"
@@ -1134,12 +929,10 @@ function ResultItem({
       >
         {value}
       </Typography>
-
     </Grid>
-
   );
-
 }
 
-
 export default Risk;
+
+

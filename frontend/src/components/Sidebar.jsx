@@ -1,7 +1,6 @@
 import { NavLink } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
 import { ROLE_PERMISSIONS } from "../utils/roles";
-
+import { useAuth } from "../context/useAuth";
 const menuItems = [
   { name: "Dashboard", path: "/dashboard" },
   { name: "Analytics", path: "/analytics" },

@@ -67,17 +67,35 @@ function AuditLogs() {
 
   };
 
+useEffect(() => {
+  let cancelled = false;
 
+  const loadInitialLogs = async () => {
+    try {
+      setLoading(true);
 
+      const res = await api.get("/audit/logs");
 
-  useEffect(()=>{
+      if (!cancelled) {
+        setLogs(res.data.logs || []);
+      }
+    } catch (error) {
+      if (!cancelled) {
+        console.error("Audit loading failed", error);
+      }
+    } finally {
+      if (!cancelled) {
+        setLoading(false);
+      }
+    }
+  };
 
-    loadLogs();
+  loadInitialLogs();
 
-  },[]);
-
-
-
+  return () => {
+    cancelled = true;
+  };
+}, []);
 
 
   const filteredLogs =

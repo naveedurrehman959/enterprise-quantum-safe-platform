@@ -29,7 +29,6 @@ import reportService from "../services/reportService";
 
 function Reports() {
   const [loading, setLoading] = useState(true);
-
   const [data, setData] = useState(null);
 
   const [snackbar, setSnackbar] = useState({
@@ -38,14 +37,84 @@ function Reports() {
     message: "",
   });
 
+  /*
+   * ============================================================
+   * Load Reports
+   * ============================================================
+   *
+   * The async function is created inside useEffect so the effect
+   * does not directly call a function that performs setState().
+   */
   useEffect(() => {
-    loadReports();
+    let cancelled = false;
+
+    const fetchReports = async () => {
+      try {
+        if (!cancelled) {
+          setLoading(true);
+        }
+
+        const [
+          summary,
+          risk,
+          compliance,
+          migration,
+          audit,
+          certificates,
+        ] = await Promise.all([
+          reportService.getSummary(),
+          reportService.getRiskReport(),
+          reportService.getComplianceReport(),
+          reportService.getMigrationReport(),
+          reportService.getAuditReport(),
+          reportService.getCertificateReport(),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setData({
+          summary: summary.data || {},
+          risk: risk.data || {},
+          compliance: compliance.data || {},
+          migration: migration.data || {},
+          audit: audit.data || {},
+          certificates: certificates.data || {},
+        });
+      } catch (error) {
+        console.error("Reports loading failed:", error);
+
+        if (!cancelled) {
+          setSnackbar({
+            open: true,
+            severity: "error",
+            message: "Unable to load reports.",
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchReports();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const loadReports = async () => {
-    setLoading(true);
-
+  /*
+   * ============================================================
+   * Manual Refresh
+   * ============================================================
+   */
+  const refreshReports = async () => {
     try {
+      setLoading(true);
+
       const [
         summary,
         risk,
@@ -63,26 +132,37 @@ function Reports() {
       ]);
 
       setData({
-        summary: summary.data,
-        risk: risk.data,
-        compliance: compliance.data,
-        migration: migration.data,
-        audit: audit.data,
-        certificates: certificates.data,
+        summary: summary.data || {},
+        risk: risk.data || {},
+        compliance: compliance.data || {},
+        migration: migration.data || {},
+        audit: audit.data || {},
+        certificates: certificates.data || {},
+      });
+
+      setSnackbar({
+        open: true,
+        severity: "success",
+        message: "Reports refreshed successfully.",
       });
     } catch (error) {
-      console.error(error);
+      console.error("Reports refresh failed:", error);
 
       setSnackbar({
         open: true,
         severity: "error",
-        message: "Unable to load reports.",
+        message: "Unable to refresh reports.",
       });
     } finally {
       setLoading(false);
     }
   };
 
+  /*
+   * ============================================================
+   * Export PDF
+   * ============================================================
+   */
   const downloadPDF = async () => {
     try {
       const response = await reportService.exportPDF();
@@ -92,17 +172,13 @@ function Reports() {
       });
 
       const url = window.URL.createObjectURL(blob);
-
       const link = document.createElement("a");
 
       link.href = url;
-
       link.download = "Enterprise-Quantum-Report.pdf";
 
       document.body.appendChild(link);
-
       link.click();
-
       link.remove();
 
       window.URL.revokeObjectURL(url);
@@ -113,7 +189,7 @@ function Reports() {
         message: "PDF exported successfully.",
       });
     } catch (error) {
-      console.error(error);
+      console.error("PDF export failed:", error);
 
       setSnackbar({
         open: true,
@@ -123,6 +199,11 @@ function Reports() {
     }
   };
 
+  /*
+   * ============================================================
+   * Export CSV
+   * ============================================================
+   */
   const downloadCSV = async () => {
     try {
       const response = await reportService.exportCSV();
@@ -132,17 +213,13 @@ function Reports() {
       });
 
       const url = window.URL.createObjectURL(blob);
-
       const link = document.createElement("a");
 
       link.href = url;
-
       link.download = "Enterprise-Quantum-Report.csv";
 
       document.body.appendChild(link);
-
       link.click();
-
       link.remove();
 
       window.URL.revokeObjectURL(url);
@@ -153,7 +230,7 @@ function Reports() {
         message: "CSV exported successfully.",
       });
     } catch (error) {
-      console.error(error);
+      console.error("CSV export failed:", error);
 
       setSnackbar({
         open: true,
@@ -163,44 +240,89 @@ function Reports() {
     }
   };
 
-  if (loading) {
+  /*
+   * ============================================================
+   * Loading State
+   * ============================================================
+   */
+  if (loading && !data) {
     return (
       <Box
         display="flex"
         justifyContent="center"
-        mt={10}
+        alignItems="center"
+        minHeight="50vh"
       >
         <CircularProgress />
       </Box>
     );
   }
 
+  /*
+   * ============================================================
+   * Error State
+   * ============================================================
+   */
   if (!data) {
-  return (
-    <Typography color="error">
-      Unable to load report data.
-    </Typography>
-  );
-};
+    return (
+      <Box
+        display="flex"
+        justifyContent="center"
+        alignItems="center"
+        minHeight="40vh"
+      >
+        <Alert severity="error">
+          Unable to load report data.
+        </Alert>
+      </Box>
+    );
+  }
+
+  const migration = data.migration || {};
+  const risk = data.risk || {};
+  const compliance = data.compliance || {};
+  const audit = data.audit || {};
+  const summary = data.summary || {};
+  const certificates = data.certificates || {};
+
+  const totalAssets = Number(migration.total_assets || 0);
+  const migratedAssets = Number(migration.migrated_assets || 0);
 
   const completion =
-    data.migration.total_assets > 0
-      ? (data.migration.migrated_assets /
-          data.migration.total_assets) *
-        100
+    totalAssets > 0
+      ? Math.min((migratedAssets / totalAssets) * 100, 100)
       : 0;
+
+  const complianceStatus =
+    compliance.status || "UNKNOWN";
+
+  const complianceHealthy = [
+    "Healthy",
+    "ACTIVE",
+    "PASS",
+    "Compliant",
+  ].includes(complianceStatus);
+
   return (
     <Box>
+      {/* ============================================================
+          Header
+          ============================================================ */}
 
       <Stack
-        direction="row"
+        direction={{
+          xs: "column",
+          md: "row",
+        }}
         justifyContent="space-between"
-        alignItems="center"
+        alignItems={{
+          xs: "flex-start",
+          md: "center",
+        }}
+        spacing={2}
         mb={4}
       >
-
         <Box>
-
           <Typography
             variant="h4"
             fontWeight="bold"
@@ -209,22 +331,29 @@ function Reports() {
           </Typography>
 
           <Typography color="text.secondary">
-            Security posture, compliance, migration analytics and executive reporting
+            Security posture, compliance, migration analytics
+            and executive reporting
           </Typography>
-
         </Box>
 
         <Stack
-          direction="row"
+          direction={{
+            xs: "column",
+            sm: "row",
+          }}
           spacing={2}
+          width={{
+            xs: "100%",
+            md: "auto",
+          }}
         >
-
           <Button
             variant="outlined"
             startIcon={<RefreshIcon />}
-            onClick={loadReports}
+            onClick={refreshReports}
+            disabled={loading}
           >
-            Refresh
+            {loading ? "Refreshing..." : "Refresh"}
           </Button>
 
           <Button
@@ -243,16 +372,22 @@ function Reports() {
           >
             Export CSV
           </Button>
-
         </Stack>
-
       </Stack>
 
+      {/* ============================================================
+          Charts
+          ============================================================ */}
+
       <ReportCharts
-        migration={data.migration}
-        risk={data.risk}
-        audit={data.audit}
+        migration={migration}
+        risk={risk}
+        audit={audit}
       />
+
+      {/* ============================================================
+          Executive Summary
+          ============================================================ */}
 
       <Box
         sx={{
@@ -264,7 +399,6 @@ function Reports() {
           boxShadow: 2,
         }}
       >
-
         <Typography
           variant="h6"
           fontWeight="bold"
@@ -277,261 +411,347 @@ function Reports() {
           color="text.secondary"
           sx={{ mb: 3 }}
         >
-          Overall enterprise security posture generated from the Risk Assessment,
-          Compliance, PKI and Migration engines.
+          Overall enterprise security posture generated from
+          the Risk Assessment, Compliance, PKI and Migration
+          engines.
         </Typography>
 
-        <Grid
-          container
-          spacing={2}
-        >
-
+        <Grid container spacing={2}>
           <Grid size={{ xs: 12, md: 3 }}>
-
             <Chip
               color={
-                ["Healthy","ACTIVE","PASS","Compliant"]
-                    .includes(data.compliance.status)
+                complianceHealthy
                   ? "success"
                   : "warning"
               }
-              label={`Compliance : ${data.compliance.status}`}
-              sx={{ width: "100%" }}
+              label={`Compliance : ${complianceStatus}`}
+              sx={{
+                width: "100%",
+              }}
             />
-
           </Grid>
 
           <Grid size={{ xs: 12, md: 3 }}>
-
             <Chip
               color="primary"
               label={`Migration : ${completion.toFixed(1)}%`}
-              sx={{ width: "100%" }}
+              sx={{
+                width: "100%",
+              }}
             />
-
           </Grid>
 
           <Grid size={{ xs: 12, md: 3 }}>
-
             <Chip
               color={
-                data.risk.critical_risk > 0
+                Number(risk.critical_risk || 0) > 0
                   ? "error"
                   : "success"
               }
-              label={`Critical Risks : ${data.risk.critical_risk}`}
-              sx={{ width: "100%" }}
+              label={`Critical Risks : ${
+                risk.critical_risk || 0
+              }`}
+              sx={{
+                width: "100%",
+              }}
             />
-
           </Grid>
 
           <Grid size={{ xs: 12, md: 3 }}>
-
             <Chip
               color="secondary"
-              label={`Audit Events : ${data.audit.total_events}`}
-              sx={{ width: "100%" }}
+              label={`Audit Events : ${
+                audit.total_events || 0
+              }`}
+              sx={{
+                width: "100%",
+              }}
             />
-
           </Grid>
-
         </Grid>
-
       </Box>
 
-      <Grid
-        container
-        spacing={3}
-      >
-      <Grid size={{ xs: 12, md: 3 }}>
-        <MetricCard
-          title="Enterprise Assets"
-          value={data.summary.total_assets || 0}
-          subtitle="Managed Assets"
-          icon={<Inventory2Icon color="primary" />}
-        />
-      </Grid>
+      {/* ============================================================
+          KPI Cards
+          ============================================================ */}
 
-      <Grid size={{ xs: 12, md: 3 }}>
-        <MetricCard
-          title="Critical Risks"
-          value={data.risk.critical_risk || 0}
-          subtitle="Immediate Attention"
-          icon={<SecurityIcon color="error" />}
-        />
-      </Grid>
-
-      <Grid size={{ xs: 12, md: 3 }}>
-        <MetricCard
-          title="PQC Certificates"
-          value={data.certificates.pqc_certificates || 0}
-          subtitle="Quantum Safe"
-          icon={<VerifiedUserIcon color="success" />}
-        />
-      </Grid>
-
-      <Grid size={{ xs: 12, md: 3 }}>
-        <MetricCard
-          title="Audit Events"
-          value={data.audit.total_events || 0}
-          subtitle="Recorded Events"
-          icon={<AssessmentIcon color="warning" />}
-        />
-      </Grid>
-
-      <Grid size={{ xs: 12, md: 4 }}>
-        <ReportCard title="Compliance Overview">
-
-          <Typography sx={{ mb: 2 }}>
-            Overall Status:
-            <strong> {data.compliance.status}</strong>
-          </Typography>
-
-          {data.compliance.frameworks?.map((framework) => (
-            <Chip
-              key={framework}
-              label={framework}
-              color="success"
-              sx={{ mr: 1, mb: 1 }}
-            />
-          ))}
-
-        </ReportCard>
-      </Grid>
-
-      <Grid size={{ xs: 12, md: 4 }}>
-        <ReportCard title="Migration Progress">
-
-          <Typography gutterBottom>
-            Migration Completion
-          </Typography>
-
-          <LinearProgress
-            variant="determinate"
-            value={completion}
-            sx={{ height: 10, borderRadius: 5 }}
+      <Grid container spacing={3}>
+        <Grid size={{ xs: 12, md: 3 }}>
+          <MetricCard
+            title="Enterprise Assets"
+            value={summary.total_assets || 0}
+            subtitle="Managed Assets"
+            icon={
+              <Inventory2Icon color="primary" />
+            }
           />
+        </Grid>
 
-          <Typography sx={{ mt: 2 }}>
-            {completion.toFixed(1)}%
-          </Typography>
+        <Grid size={{ xs: 12, md: 3 }}>
+          <MetricCard
+            title="Critical Risks"
+            value={risk.critical_risk || 0}
+            subtitle="Immediate Attention"
+            icon={
+              <SecurityIcon color="error" />
+            }
+          />
+        </Grid>
 
-          <Divider sx={{ my: 2 }} />
+        <Grid size={{ xs: 12, md: 3 }}>
+          <MetricCard
+            title="PQC Certificates"
+            value={
+              certificates.pqc_certificates || 0
+            }
+            subtitle="Quantum Safe"
+            icon={
+              <VerifiedUserIcon color="success" />
+            }
+          />
+        </Grid>
 
-          <Typography>
-            Migrated Assets:
-            <strong> {data.migration.migrated_assets}</strong>
-          </Typography>
+        <Grid size={{ xs: 12, md: 3 }}>
+          <MetricCard
+            title="Audit Events"
+            value={audit.total_events || 0}
+            subtitle="Recorded Events"
+            icon={
+              <AssessmentIcon color="warning" />
+            }
+          />
+        </Grid>
 
-          <Typography>
-            Pending Assets:
-            <strong> {data.migration.pending_assets}</strong>
-          </Typography>
+        {/* ============================================================
+            Compliance
+            ============================================================ */}
 
-        </ReportCard>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <ReportCard title="Compliance Overview">
+            <Typography sx={{ mb: 2 }}>
+              Overall Status:
+              <strong> {complianceStatus}</strong>
+            </Typography>
+
+            {Array.isArray(compliance.frameworks) &&
+              compliance.frameworks.map(
+                (framework) => (
+                  <Chip
+                    key={framework}
+                    label={framework}
+                    color="success"
+                    sx={{
+                      mr: 1,
+                      mb: 1,
+                    }}
+                  />
+                )
+              )}
+          </ReportCard>
+        </Grid>
+
+        {/* ============================================================
+            Migration
+            ============================================================ */}
+
+        <Grid size={{ xs: 12, md: 4 }}>
+          <ReportCard title="Migration Progress">
+            <Typography gutterBottom>
+              Migration Completion
+            </Typography>
+
+            <LinearProgress
+              variant="determinate"
+              value={completion}
+              sx={{
+                height: 10,
+                borderRadius: 5,
+              }}
+            />
+
+            <Typography sx={{ mt: 2 }}>
+              {completion.toFixed(1)}%
+            </Typography>
+
+            <Divider sx={{ my: 2 }} />
+
+            <Typography>
+              Migrated Assets:
+              <strong>
+                {" "}
+                {migration.migrated_assets || 0}
+              </strong>
+            </Typography>
+
+            <Typography>
+              Pending Assets:
+              <strong>
+                {" "}
+                {migration.pending_assets || 0}
+              </strong>
+            </Typography>
+
+            <Typography>
+              Total Assets:
+              <strong>
+                {" "}
+                {migration.total_assets || 0}
+              </strong>
+            </Typography>
+          </ReportCard>
+        </Grid>
+
+        {/* ============================================================
+            Certificates
+            ============================================================ */}
+
+        <Grid size={{ xs: 12, md: 4 }}>
+          <ReportCard title="Certificate Summary">
+            <Typography>
+              PQC Certificates:
+              <strong>
+                {" "}
+                {certificates.pqc_certificates || 0}
+              </strong>
+            </Typography>
+
+            <Typography>
+              Classical Certificates:
+              <strong>
+                {" "}
+                {certificates.classical_certificates || 0}
+              </strong>
+            </Typography>
+
+            <Typography>
+              Total Certificates:
+              <strong>
+                {" "}
+                {certificates.total_certificates || 0}
+              </strong>
+            </Typography>
+          </ReportCard>
+        </Grid>
+
+        {/* ============================================================
+            Risk
+            ============================================================ */}
+
+        <Grid size={{ xs: 12, md: 6 }}>
+          <ReportCard title="Risk Summary">
+            <Stack
+              direction="row"
+              justifyContent="space-between"
+              sx={{ mb: 1 }}
+            >
+              <Typography>
+                Critical Risks
+              </Typography>
+
+              <Chip
+                label={risk.critical_risk || 0}
+                color="error"
+                size="small"
+              />
+            </Stack>
+
+            <Typography>
+              High:
+              <strong>
+                {" "}
+                {risk.high_risk || 0}
+              </strong>
+            </Typography>
+
+            <Typography>
+              Medium:
+              <strong>
+                {" "}
+                {risk.medium_risk || 0}
+              </strong>
+            </Typography>
+
+            <Typography>
+              Safe Assets:
+              <strong>
+                {" "}
+                {risk.safe_assets || 0}
+              </strong>
+            </Typography>
+
+            <Typography>
+              Total Assets:
+              <strong>
+                {" "}
+                {risk.total_assets || 0}
+              </strong>
+            </Typography>
+          </ReportCard>
+        </Grid>
+
+        {/* ============================================================
+            Audit
+            ============================================================ */}
+
+        <Grid size={{ xs: 12, md: 6 }}>
+          <ReportCard title="Audit Summary">
+            <Typography>
+              Successful Events:
+              <strong>
+                {" "}
+                {audit.successful_events || 0}
+              </strong>
+            </Typography>
+
+            <Typography>
+              Failed Events:
+              <strong>
+                {" "}
+                {audit.failed_events || 0}
+              </strong>
+            </Typography>
+
+            <Typography>
+              Total Events:
+              <strong>
+                {" "}
+                {audit.total_events || 0}
+              </strong>
+            </Typography>
+          </ReportCard>
+        </Grid>
       </Grid>
 
-      <Grid size={{ xs: 12, md: 4 }}>
-        <ReportCard title="Certificate Summary">
+      {/* ============================================================
+          Snackbar
+          ============================================================ */}
 
-          <Typography>
-            PQC Certificates:
-            <strong> {data.certificates.pqc_certificates}</strong>
-          </Typography>
-
-          <Typography>
-            Classical Certificates:
-            <strong> {data.certificates.classical_certificates}</strong>
-          </Typography>
-
-          <Typography>
-            Total Certificates:
-            <strong> {data.certificates.total_certificates}</strong>
-          </Typography>
-
-        </ReportCard>
-      </Grid>
-
-      <Grid size={{ xs: 12, md: 6 }}>
-        <ReportCard title="Risk Summary">
-
-          <Stack
-    direction="row"
-    justifyContent="space-between"
-    sx={{ mb: 1 }}
->
-    <Typography>Critical Risks</Typography>
-
-    <Chip
-        label={data.risk.critical_risk}
-        color="error"
-        size="small"
-    />
-</Stack>
-
-          <Typography>
-            High:
-            <strong> {data.risk.high_risk}</strong>
-          </Typography>
-
-          <Typography>
-            Medium:
-            <strong> {data.risk.medium_risk}</strong>
-          </Typography>
-
-          <Typography>
-            Safe Assets:
-            <strong> {data.risk.safe_assets}</strong>
-          </Typography>
-
-        </ReportCard>
-      </Grid>
-
-      <Grid size={{ xs: 12, md: 6 }}>
-        <ReportCard title="Audit Summary">
-
-          <Typography>
-            Successful Events:
-            <strong> {data.audit.successful_events}</strong>
-          </Typography>
-
-          <Typography>
-            Failed Events:
-            <strong> {data.audit.failed_events}</strong>
-          </Typography>
-
-          <Typography>
-            Total Events:
-            <strong> {data.audit.total_events}</strong>
-          </Typography>
-
-        </ReportCard>
-      </Grid>
-
-    </Grid>
-
-    <Snackbar
-      open={snackbar.open}
-      autoHideDuration={3000}
-      onClose={() =>
-        setSnackbar({
-          ...snackbar,
-          open: false,
-        })
-      }
-    >
-      <Alert
-        severity={snackbar.severity}
-        variant="filled"
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={3000}
+        onClose={() =>
+          setSnackbar((current) => ({
+            ...current,
+            open: false,
+          }))
+        }
       >
-        {snackbar.message}
-      </Alert>
-    </Snackbar>
-
-  </Box>
-);
-
+        <Alert
+          severity={snackbar.severity}
+          variant="filled"
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+    </Box>
+  );
 }
+
+/*
+ * ================================================================
+ * Metric Card
+ * ================================================================
+ */
 
 function MetricCard({
   title,
@@ -539,19 +759,20 @@ function MetricCard({
   subtitle,
   icon,
 }) {
-
   return (
-    <Card elevation={3} sx={{ height: "100%" }}>
+    <Card
+      elevation={3}
+      sx={{
+        height: "100%",
+      }}
+    >
       <CardContent>
-
         <Stack
           direction="row"
           justifyContent="space-between"
           alignItems="center"
         >
-
           <Box>
-
             <Typography
               color="text.secondary"
               variant="body2"
@@ -573,28 +794,33 @@ function MetricCard({
             >
               {subtitle}
             </Typography>
-
           </Box>
 
           {icon}
-
         </Stack>
-
       </CardContent>
     </Card>
   );
-
 }
+
+/*
+ * ================================================================
+ * Report Card
+ * ================================================================
+ */
 
 function ReportCard({
   title,
   children,
 }) {
-
   return (
-    <Card elevation={3} sx={{ height: "100%" }}>
+    <Card
+      elevation={3}
+      sx={{
+        height: "100%",
+      }}
+    >
       <CardContent>
-
         <Typography
           variant="h6"
           fontWeight="bold"
@@ -605,11 +831,9 @@ function ReportCard({
         <Divider sx={{ my: 2 }} />
 
         {children}
-
       </CardContent>
     </Card>
   );
-
 }
 
 export default Reports;

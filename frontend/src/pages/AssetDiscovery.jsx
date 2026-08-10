@@ -185,14 +185,14 @@ function AssetDiscovery() {
     }
   };
 
-
   useEffect(() => {
+    const load = async () => {
+        await loadAssets();
+    };
 
-    loadAssets();
-
+    load();
   }, []);
-
-
+  
   const handleScan = async () => {
 
     if (!target.trim()) {

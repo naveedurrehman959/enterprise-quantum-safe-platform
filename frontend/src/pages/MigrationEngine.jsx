@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+
+import { useCallback, useEffect, useState } from "react";
 
 import {
   Box,
@@ -20,9 +21,6 @@ import {
 } from "@mui/material";
 
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
-import SecurityIcon from "@mui/icons-material/Security";
-import HubIcon from "@mui/icons-material/Hub";
-import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import VerifiedIcon from "@mui/icons-material/Verified";
 
@@ -41,38 +39,75 @@ function MigrationEngine() {
   const [analysis, setAnalysis] = useState(null);
   const [plan, setPlan] = useState(null);
 
-  useEffect(() => {
-    loadData();
+  /*
+   * ============================================================
+   * Load Migration Engine Data
+   * ============================================================
+   */
+
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+
+      const [policyRes, statusRes, reportRes] =
+        await Promise.all([
+          policyService.getStatus(),
+          migrationService.getStatus(),
+          migrationService.getReport(),
+        ]);
+
+      setPolicy(policyRes.data || {});
+      setStatus(statusRes.data || {});
+      setReport(reportRes.data || {});
+    } catch (error) {
+      console.error(
+        "Migration Engine data loading failed:",
+        error
+      );
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const loadData = async () => {
-    try {
-      const [policyRes, statusRes, reportRes] = await Promise.all([
-        policyService.getStatus(),
-        migrationService.getStatus(),
-        migrationService.getReport(),
-      ]);
+  /*
+   * ============================================================
+   * Initial Load
+   * ============================================================
+   */
 
-      setPolicy(policyRes.data);
-      setStatus(statusRes.data);
-      setReport(reportRes.data);
-    } catch (error) {
-      console.error(error);
-    }
+  useEffect(() => {
+    const loadInitialData = async () => {
+      await loadData();
+    };
 
-    setLoading(false);
-  };
+    loadInitialData();
+  }, [loadData]);
+
+  /*
+   * ============================================================
+   * Migration Analysis
+   * ============================================================
+   */
 
   const analyze = async () => {
     try {
       const response =
         await migrationService.analyze(algorithm);
 
-      setAnalysis(response.data);
+      setAnalysis(response.data || null);
     } catch (error) {
-      console.error(error);
+      console.error(
+        "Migration analysis failed:",
+        error
+      );
     }
   };
+
+  /*
+   * ============================================================
+   * Generate Migration Plan
+   * ============================================================
+   */
 
   const generatePlan = async () => {
     try {
@@ -81,27 +116,42 @@ function MigrationEngine() {
           algorithm
         );
 
-      setPlan(response.data);
+      setPlan(response.data || null);
     } catch (error) {
-      console.error(error);
+      console.error(
+        "Migration plan generation failed:",
+        error
+      );
     }
   };
+
+  /*
+   * ============================================================
+   * Loading State
+   * ============================================================
+   */
 
   if (loading) {
     return (
       <Box
         display="flex"
         justifyContent="center"
-        mt={10}
+        alignItems="center"
+        minHeight="400px"
       >
         <CircularProgress />
       </Box>
     );
   }
 
+  /*
+   * ============================================================
+   * Dashboard
+   * ============================================================
+   */
+
   return (
     <Box>
-
       <Typography
         variant="h4"
         fontWeight="bold"
@@ -117,26 +167,31 @@ function MigrationEngine() {
         Enterprise Post-Quantum Cryptography Migration Center
       </Typography>
 
-      <Grid container spacing={3}>
+      {/* ======================================================
+          Metrics
+          ====================================================== */}
 
+      <Grid container spacing={3}>
         <Grid size={{ xs: 12, md: 3 }}>
           <MetricCard
             title="Engine"
-            value={status.status}
+            value={status.status || "UNKNOWN"}
           />
         </Grid>
 
         <Grid size={{ xs: 12, md: 3 }}>
           <MetricCard
             title="Module"
-            value={report.module}
+            value={report.module || "Migration Engine"}
           />
         </Grid>
 
         <Grid size={{ xs: 12, md: 3 }}>
           <MetricCard
             title="Compliance"
-            value={report.compliance?.length || 0}
+            value={
+              report.compliance?.length || 0
+            }
           />
         </Grid>
 
@@ -148,21 +203,20 @@ function MigrationEngine() {
             }
           />
         </Grid>
-
       </Grid>
+
+      {/* ======================================================
+          Migration Status + Security Policy
+          ====================================================== */}
 
       <Grid
         container
         spacing={3}
         sx={{ mt: 1 }}
       >
-
         <Grid size={{ xs: 12, md: 6 }}>
-
           <Card>
-
             <CardContent>
-
               <Typography
                 variant="h6"
                 gutterBottom
@@ -173,11 +227,15 @@ function MigrationEngine() {
               <Divider sx={{ mb: 2 }} />
 
               <Typography>
-                Status :
+                Status:
+
                 <Chip
                   sx={{ ml: 1 }}
                   color="success"
-                  label={status.status}
+                  label={
+                    status.status || "UNKNOWN"
+                  }
+                  size="small"
                 />
               </Typography>
 
@@ -202,14 +260,17 @@ function MigrationEngine() {
                 direction="row"
                 spacing={1}
                 flexWrap="wrap"
+                useFlexGap
               >
-                {status.supported_modes?.map((mode) => (
-                  <Chip
-                    key={mode}
-                    label={mode}
-                    color="primary"
-                  />
-                ))}
+                {status.supported_modes?.map(
+                  (mode) => (
+                    <Chip
+                      key={mode}
+                      label={mode}
+                      color="primary"
+                    />
+                  )
+                )}
               </Stack>
 
               <Typography
@@ -223,28 +284,25 @@ function MigrationEngine() {
                 direction="row"
                 spacing={1}
                 flexWrap="wrap"
+                useFlexGap
               >
-                {status.target_algorithms?.map((algo) => (
-                  <Chip
-                    key={algo}
-                    color="success"
-                    label={algo}
-                  />
-                ))}
+                {status.target_algorithms?.map(
+                  (algo) => (
+                    <Chip
+                      key={algo}
+                      color="success"
+                      label={algo}
+                    />
+                  )
+                )}
               </Stack>
-
             </CardContent>
-
           </Card>
-
         </Grid>
 
         <Grid size={{ xs: 12, md: 6 }}>
-
           <Card>
-
             <CardContent>
-
               <Typography
                 variant="h6"
                 gutterBottom
@@ -262,14 +320,17 @@ function MigrationEngine() {
                 direction="row"
                 spacing={1}
                 flexWrap="wrap"
+                useFlexGap
               >
-                {policy.allowed_algorithms?.map((item) => (
-                  <Chip
-                    key={item}
-                    color="success"
-                    label={item}
-                  />
-                ))}
+                {policy.allowed_algorithms?.map(
+                  (item) => (
+                    <Chip
+                      key={item}
+                      color="success"
+                      label={item}
+                    />
+                  )
+                )}
               </Stack>
 
               <Typography
@@ -283,28 +344,29 @@ function MigrationEngine() {
                 direction="row"
                 spacing={1}
                 flexWrap="wrap"
+                useFlexGap
               >
-                {policy.blocked_algorithms?.map((item) => (
-                  <Chip
-                    key={item}
-                    color="error"
-                    label={item}
-                  />
-                ))}
+                {policy.blocked_algorithms?.map(
+                  (item) => (
+                    <Chip
+                      key={item}
+                      color="error"
+                      label={item}
+                    />
+                  )
+                )}
               </Stack>
-
             </CardContent>
-
           </Card>
-
         </Grid>
-
       </Grid>
 
+      {/* ======================================================
+          Migration Analysis
+          ====================================================== */}
+
       <Card sx={{ mt: 3 }}>
-
         <CardContent>
-
           <Typography
             variant="h6"
             gutterBottom
@@ -315,17 +377,21 @@ function MigrationEngine() {
           <Divider sx={{ mb: 3 }} />
 
           <Stack
-            direction="row"
+            direction={{ xs: "column", sm: "row" }}
             spacing={2}
           >
-
             <TextField
               label="Algorithm"
               value={algorithm}
-              onChange={(e) =>
-                setAlgorithm(e.target.value)
+              onChange={(event) =>
+                setAlgorithm(event.target.value)
               }
-              sx={{ width: 300 }}
+              sx={{
+                width: {
+                  xs: "100%",
+                  sm: 300,
+                },
+              }}
             />
 
             <Button
@@ -341,17 +407,17 @@ function MigrationEngine() {
             >
               Generate Plan
             </Button>
-
           </Stack>
-
         </CardContent>
-
       </Card>
+
+      {/* ======================================================
+          Analysis Result
+          ====================================================== */}
 
       {analysis && (
         <Card sx={{ mt: 3 }}>
           <CardContent>
-
             <Typography
               variant="h6"
               gutterBottom
@@ -362,18 +428,21 @@ function MigrationEngine() {
             <Divider sx={{ mb: 2 }} />
 
             <Grid container spacing={2}>
-
               <Grid size={{ xs: 12, md: 4 }}>
                 <MetricCard
                   title="Risk Score"
-                  value={analysis.risk_score}
+                  value={
+                    analysis.risk_score ?? "N/A"
+                  }
                 />
               </Grid>
 
               <Grid size={{ xs: 12, md: 4 }}>
                 <MetricCard
                   title="Risk Level"
-                  value={analysis.risk_level}
+                  value={
+                    analysis.risk_level || "N/A"
+                  }
                 />
               </Grid>
 
@@ -387,7 +456,6 @@ function MigrationEngine() {
                   }
                 />
               </Grid>
-
             </Grid>
 
             <Typography
@@ -398,7 +466,8 @@ function MigrationEngine() {
             </Typography>
 
             <Typography>
-              {analysis.recommendation}
+              {analysis.recommendation ||
+                "No recommendation available."}
             </Typography>
 
             <Typography
@@ -412,24 +481,33 @@ function MigrationEngine() {
               direction="row"
               spacing={1}
               mt={1}
+              flexWrap="wrap"
+              useFlexGap
             >
-              {analysis.recommended_algorithm?.map((item) => (
-                <Chip
-                  key={item}
-                  color="success"
-                  label={item}
-                />
-              ))}
+              {Array.isArray(
+                analysis.recommended_algorithm
+              ) &&
+                analysis.recommended_algorithm.map(
+                  (item) => (
+                    <Chip
+                      key={item}
+                      color="success"
+                      label={item}
+                    />
+                  )
+                )}
             </Stack>
-
           </CardContent>
         </Card>
       )}
 
+      {/* ======================================================
+          Migration Plan
+          ====================================================== */}
+
       {plan && (
         <Card sx={{ mt: 3 }}>
           <CardContent>
-
             <Typography
               variant="h6"
               gutterBottom
@@ -440,37 +518,38 @@ function MigrationEngine() {
             <Divider sx={{ mb: 2 }} />
 
             <List>
+              {plan.migration_steps?.map(
+                (step, index) => (
+                  <ListItem
+                    key={`${step}-${index}`}
+                  >
+                    <ListItemIcon>
+                      <ArrowForwardIcon color="primary" />
+                    </ListItemIcon>
 
-              {plan.migration_steps?.map((step) => (
-                <ListItem key={step}>
-
-                  <ListItemIcon>
-                    <ArrowForwardIcon color="primary" />
-                  </ListItemIcon>
-
-                  <ListItemText primary={step} />
-
-                </ListItem>
-              ))}
-
+                    <ListItemText
+                      primary={step}
+                    />
+                  </ListItem>
+                )
+              )}
             </List>
-
           </CardContent>
         </Card>
       )}
+
+      {/* ======================================================
+          Compliance + Platform Features
+          ====================================================== */}
 
       <Grid
         container
         spacing={3}
         sx={{ mt: 2 }}
       >
-
         <Grid size={{ xs: 12, md: 6 }}>
-
           <Card>
-
             <CardContent>
-
               <Typography
                 variant="h6"
                 gutterBottom
@@ -481,30 +560,24 @@ function MigrationEngine() {
               <Divider sx={{ mb: 2 }} />
 
               <Stack spacing={1}>
-
-                {report.compliance?.map((item) => (
-                  <Chip
-                    key={item}
-                    icon={<VerifiedIcon />}
-                    label={item}
-                    color="success"
-                  />
-                ))}
-
+                {report.compliance?.map(
+                  (item) => (
+                    <Chip
+                      key={item}
+                      icon={<VerifiedIcon />}
+                      label={item}
+                      color="success"
+                    />
+                  )
+                )}
               </Stack>
-
             </CardContent>
-
           </Card>
-
         </Grid>
 
         <Grid size={{ xs: 12, md: 6 }}>
-
           <Card>
-
             <CardContent>
-
               <Typography
                 variant="h6"
                 gutterBottom
@@ -515,39 +588,40 @@ function MigrationEngine() {
               <Divider sx={{ mb: 2 }} />
 
               <List>
+                {report.features?.map(
+                  (item) => (
+                    <ListItem key={item}>
+                      <ListItemIcon>
+                        <CheckCircleIcon color="primary" />
+                      </ListItemIcon>
 
-                {report.features?.map((item) => (
-                  <ListItem key={item}>
-
-                    <ListItemIcon>
-                      <CheckCircleIcon color="primary" />
-                    </ListItemIcon>
-
-                    <ListItemText primary={item} />
-
-                  </ListItem>
-                ))}
-
+                      <ListItemText
+                        primary={item}
+                      />
+                    </ListItem>
+                  )
+                )}
               </List>
-
             </CardContent>
-
           </Card>
-
         </Grid>
-
       </Grid>
-
     </Box>
   );
 }
 
 function MetricCard({ title, value }) {
   return (
-    <Card elevation={3}>
+    <Card
+      elevation={3}
+      sx={{
+        height: "100%",
+      }}
+    >
       <CardContent>
-
-        <Typography color="text.secondary">
+        <Typography
+          color="text.secondary"
+        >
           {title}
         </Typography>
 
@@ -558,10 +632,11 @@ function MetricCard({ title, value }) {
         >
           {value}
         </Typography>
-
       </CardContent>
     </Card>
   );
 }
 
 export default MigrationEngine;
+
+
