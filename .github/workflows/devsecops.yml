@@ -175,7 +175,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install Dependencies
-        run: npm ci
+        run: |
+          npm ci
 
       - name: Run npm audit
         run: |
@@ -261,7 +262,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Syft
+      - name: Generate SBOM
         uses: anchore/sbom-action@v0
         with:
           path: .
@@ -274,8 +275,31 @@ jobs:
           name: enterprise-quantum-safe-sbom
           path: sbom-cyclonedx.json
 
+
   # ============================================================
-  # 10. DOCKER BUILD
+  # 10. INFRASTRUCTURE / CONFIGURATION SCANNING
+  # ============================================================
+
+  iac-scan:
+    name: IaC and Configuration Security
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Trivy Configuration Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+
+  # ============================================================
+  # 11. DOCKER BUILD
   # ============================================================
 
   docker-build:
@@ -292,6 +316,7 @@ jobs:
       - frontend-validation
       - iac-scan
       - sbom
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -323,7 +348,7 @@ jobs:
 
 
   # ============================================================
-  # 11. CONTAINER SECURITY SCANNING
+  # 12. CONTAINER SECURITY SCANNING
   # ============================================================
 
   container-scan:
@@ -366,11 +391,11 @@ jobs:
 
 
   # ============================================================
-  # 12. PUBLISH APPROVED IMAGES TO GHCR
+  # 13. PUBLISH APPROVED IMAGES TO GHCR + DOCKER HUB
   # ============================================================
 
   publish-images:
-    name: Publish Images to GHCR
+    name: Publish Images to GHCR and Docker Hub
     runs-on: ubuntu-latest
 
     needs:
@@ -381,77 +406,169 @@ jobs:
       packages: write
 
     env:
-      REGISTRY: ghcr.io
-      IMAGE_PREFIX: ghcr.io/naveedurrehman959/enterprise-quantum-safe-platform
+      GHCR_REGISTRY: ghcr.io
+      GHCR_IMAGE_PREFIX: ghcr.io/naveedurrehman959/enterprise-quantum-safe-platform
+
+      DOCKERHUB_IMAGE_PREFIX: naveedurehman/enterprise-quantum-safe
 
     steps:
+
+      # --------------------------------------------------------
+      # Checkout
+      # --------------------------------------------------------
+
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+
+      # --------------------------------------------------------
+      # Download approved Docker images
+      # --------------------------------------------------------
 
       - name: Download Docker Images
         uses: actions/download-artifact@v4
         with:
           name: enterprise-docker-images
 
+
+      # --------------------------------------------------------
+      # Load images
+      # --------------------------------------------------------
+
       - name: Load Docker Images
         run: |
           docker load -i docker-images.tar
 
+
+      # --------------------------------------------------------
+      # Login to GHCR
+      # --------------------------------------------------------
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Tag Backend Image
+
+      # --------------------------------------------------------
+      # Login to Docker Hub
+      # --------------------------------------------------------
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+
+      # --------------------------------------------------------
+      # Tag Backend for GHCR
+      # --------------------------------------------------------
+
+      - name: Tag Backend Image for GHCR
         run: |
           docker tag \
             enterprise-quantum-safe-backend:${{ github.sha }} \
-            ${{ env.IMAGE_PREFIX }}-backend:${{ github.sha }}
+            ${{ env.GHCR_IMAGE_PREFIX }}-backend:${{ github.sha }}
 
-      - name: Tag Frontend Image
+
+      # --------------------------------------------------------
+      # Tag Frontend for GHCR
+      # --------------------------------------------------------
+
+      - name: Tag Frontend Image for GHCR
         run: |
           docker tag \
             enterprise-quantum-safe-frontend:${{ github.sha }} \
-            ${{ env.IMAGE_PREFIX }}-frontend:${{ github.sha }}
+            ${{ env.GHCR_IMAGE_PREFIX }}-frontend:${{ github.sha }}
 
-      - name: Push Backend Image
+
+      # --------------------------------------------------------
+      # Tag Backend for Docker Hub
+      # --------------------------------------------------------
+
+      - name: Tag Backend Image for Docker Hub
+        run: |
+          docker tag \
+            enterprise-quantum-safe-backend:${{ github.sha }} \
+            ${{ env.DOCKERHUB_IMAGE_PREFIX }}-backend:${{ github.sha }}
+
+
+      # --------------------------------------------------------
+      # Tag Frontend for Docker Hub
+      # --------------------------------------------------------
+
+      - name: Tag Frontend Image for Docker Hub
+        run: |
+          docker tag \
+            enterprise-quantum-safe-frontend:${{ github.sha }} \
+            ${{ env.DOCKERHUB_IMAGE_PREFIX }}-frontend:${{ github.sha }}
+
+
+      # --------------------------------------------------------
+      # Push Backend to GHCR
+      # --------------------------------------------------------
+
+      - name: Push Backend Image to GHCR
         run: |
           docker push \
-            ${{ env.IMAGE_PREFIX }}-backend:${{ github.sha }}
+            ${{ env.GHCR_IMAGE_PREFIX }}-backend:${{ github.sha }}
 
-      - name: Push Frontend Image
+
+      # --------------------------------------------------------
+      # Push Frontend to GHCR
+      # --------------------------------------------------------
+
+      - name: Push Frontend Image to GHCR
         run: |
           docker push \
-            ${{ env.IMAGE_PREFIX }}-frontend:${{ github.sha }}
+            ${{ env.GHCR_IMAGE_PREFIX }}-frontend:${{ github.sha }}
+
+
+      # --------------------------------------------------------
+      # Push Backend to Docker Hub
+      # --------------------------------------------------------
+
+      - name: Push Backend Image to Docker Hub
+        run: |
+          docker push \
+            ${{ env.DOCKERHUB_IMAGE_PREFIX }}-backend:${{ github.sha }}
+
+
+      # --------------------------------------------------------
+      # Push Frontend to Docker Hub
+      # --------------------------------------------------------
+
+      - name: Push Frontend Image to Docker Hub
+        run: |
+          docker push \
+            ${{ env.DOCKERHUB_IMAGE_PREFIX }}-frontend:${{ github.sha }}
+
+
+      # --------------------------------------------------------
+      # Deployment information
+      # --------------------------------------------------------
 
       - name: Publish Deployment Information
         run: |
-          echo "Backend:"
-          echo "${{ env.IMAGE_PREFIX }}-backend:${{ github.sha }}"
+          echo "=========================================="
+          echo "Images Published Successfully"
+          echo "=========================================="
 
-          echo "Frontend:"
-          echo "${{ env.IMAGE_PREFIX }}-frontend:${{ github.sha }}"
+          echo ""
+          echo "Backend - GHCR:"
+          echo "${{ env.GHCR_IMAGE_PREFIX }}-backend:${{ github.sha }}"
 
+          echo ""
+          echo "Frontend - GHCR:"
+          echo "${{ env.GHCR_IMAGE_PREFIX }}-frontend:${{ github.sha }}"
 
-  # ============================================================
-  # 12. INFRASTRUCTURE / CONFIGURATION SCANNING
-  # ============================================================
+          echo ""
+          echo "Backend - Docker Hub:"
+          echo "${{ env.DOCKERHUB_IMAGE_PREFIX }}-backend:${{ github.sha }}"
 
-  iac-scan:
-    name: IaC and Configuration Security
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Trivy Configuration Scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: config
-          scan-ref: .
-          severity: HIGH,CRITICAL
-          exit-code: "1"
-          ignore-unfixed: true
+          echo ""
+          echo "Frontend - Docker Hub:"
+          echo "${{ env.DOCKERHUB_IMAGE_PREFIX }}-frontend:${{ github.sha }}"
