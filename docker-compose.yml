@@ -38,9 +38,8 @@ services:
 
     environment:
       POSTGRES_DB: enterprise_qs
-      POSTGRES_USER: qs_admin
-      POSTGRES_PASSWORD: qs_password
-
+       DB_USERNAME: ${{ secrets.DB_USERNAME }}
+       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
