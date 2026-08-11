@@ -301,7 +301,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Trivy Configuration Scan
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
           scan-ref: .
@@ -381,7 +381,7 @@ jobs:
           docker load -i docker-images.tar
 
       - name: Scan Backend Image
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
           format: table
@@ -390,7 +390,7 @@ jobs:
           ignore-unfixed: true
 
       - name: Scan Frontend Image
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
           format: table
