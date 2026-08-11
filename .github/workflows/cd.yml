@@ -1,0 +1,320 @@
+```yaml
+name: Deploy Quantum-Safe Platform
+
+# ============================================================
+# Trigger CD AFTER DevSecOps workflow succeeds
+# ============================================================
+
+on:
+  workflow_run:
+    workflows:
+      - "Enterprise Quantum-Safe DevSecOps"
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+
+  # ==========================================================
+  # DEPLOY TO AWS EC2
+  # ==========================================================
+
+  deploy-ec2:
+    name: Deploy to AWS EC2
+    runs-on: ubuntu-latest
+
+    # Only deploy if:
+    # 1. DevSecOps workflow succeeded
+    # 2. It was triggered from main or master
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      (
+        github.event.workflow_run.head_branch == 'main' ||
+        github.event.workflow_run.head_branch == 'master'
+      )
+
+    steps:
+
+      # ======================================================
+      # 1. Checkout EXACT commit approved by DevSecOps
+      # ======================================================
+
+      - name: Checkout Approved Commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      # ======================================================
+      # 2. Configure SSH
+      # ======================================================
+
+      - name: Configure SSH
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      # ======================================================
+      # 3. Add EC2 Host to Known Hosts
+      # ======================================================
+
+      - name: Add EC2 to Known Hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      # ======================================================
+      # 4. Prepare EC2 directories
+      # ======================================================
+
+      - name: Prepare EC2 Deployment Directory
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+
+            sudo mkdir -p /opt/quantum-safe
+            sudo mkdir -p /opt/quantum-safe/nginx
+            sudo mkdir -p /opt/quantum-safe/nginx/ssl
+            sudo mkdir -p /opt/quantum-safe/prometheus
+
+            sudo chown -R ubuntu:ubuntu /opt/quantum-safe
+
+          EOF
+
+      # ======================================================
+      # 5. Copy docker-compose.yml
+      # ======================================================
+
+      - name: Copy Docker Compose
+        run: |
+          scp docker-compose.yml \
+            ubuntu@${{ secrets.EC2_HOST }}:/opt/quantum-safe/docker-compose.yml
+
+      # ======================================================
+      # 6. Copy Nginx configuration
+      # ======================================================
+
+      - name: Copy Nginx Configuration
+        run: |
+          scp -r nginx/* \
+            ubuntu@${{ secrets.EC2_HOST }}:/opt/quantum-safe/nginx/
+
+      # ======================================================
+      # 7. Copy Prometheus configuration
+      # ======================================================
+
+      - name: Copy Prometheus Configuration
+        run: |
+          scp -r prometheus/* \
+            ubuntu@${{ secrets.EC2_HOST }}:/opt/quantum-safe/prometheus/
+
+      # ======================================================
+      # 8. Update image tags
+      #
+      # IMPORTANT:
+      # Use the SHA from the successful DevSecOps workflow.
+      # ======================================================
+
+      - name: Update Docker Image Tags
+        env:
+          IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+        run: |
+
+          echo "Approved image tag:"
+          echo "${IMAGE_TAG}"
+
+          sed -i \
+            "s|naveedurehman/enterprise-quantum-safe-backend:[^[:space:]]*|naveedurehman/enterprise-quantum-safe-backend:${IMAGE_TAG}|g" \
+            docker-compose.yml
+
+          sed -i \
+            "s|naveedurehman/enterprise-quantum-safe-frontend:[^[:space:]]*|naveedurehman/enterprise-quantum-safe-frontend:${IMAGE_TAG}|g" \
+            docker-compose.yml
+
+          echo ""
+          echo "=========================================="
+          echo "Images to deploy"
+          echo "=========================================="
+
+          grep "naveedurehman/enterprise-quantum-safe" docker-compose.yml
+
+      # ======================================================
+      # 9. Copy updated docker-compose.yml
+      # ======================================================
+
+      - name: Copy Updated Docker Compose
+        run: |
+          scp docker-compose.yml \
+            ubuntu@${{ secrets.EC2_HOST }}:/opt/quantum-safe/docker-compose.yml
+
+      # ======================================================
+      # 10. Validate Docker Compose
+      # ======================================================
+
+      - name: Validate Docker Compose
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+
+            cd /opt/quantum-safe
+
+            echo "Validating Docker Compose..."
+
+            docker compose config
+
+            echo "Docker Compose configuration is valid."
+
+          EOF
+
+      # ======================================================
+      # 11. Pull approved images from Docker Hub
+      # ======================================================
+
+      - name: Pull Docker Images
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+
+            cd /opt/quantum-safe
+
+            docker compose pull
+
+          EOF
+
+      # ======================================================
+      # 12. Deploy application
+      # ======================================================
+
+      - name: Deploy Application
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+
+            cd /opt/quantum-safe
+
+            docker compose up -d
+
+          EOF
+
+      # ======================================================
+      # 13. Wait for containers
+      # ======================================================
+
+      - name: Wait for Containers
+        run: |
+          echo "Waiting for containers to start..."
+          sleep 20
+
+      # ======================================================
+      # 14. Check container status
+      # ======================================================
+
+      - name: Check Container Status
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+
+            cd /opt/quantum-safe
+
+            echo "=========================================="
+            echo "CONTAINER STATUS"
+            echo "=========================================="
+
+            docker compose ps
+
+            echo ""
+            echo "=========================================="
+            echo "DEPLOYED APPLICATION IMAGES"
+            echo "=========================================="
+
+            docker images | grep enterprise-quantum-safe || true
+
+          EOF
+
+      # ======================================================
+      # 15. Application health check
+      # ======================================================
+
+      - name: Application Health Check
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+
+            set -e
+
+            echo "=========================================="
+            echo "APPLICATION HEALTH CHECK"
+            echo "=========================================="
+
+            for i in {1..10}; do
+
+              if curl -f -s http://localhost/ > /dev/null; then
+
+                echo ""
+                echo "Application is healthy."
+                echo "Health check PASSED."
+
+                exit 0
+
+              fi
+
+              echo "Attempt $i/10 failed."
+              echo "Waiting 5 seconds..."
+
+              sleep 5
+
+            done
+
+            echo ""
+            echo "=========================================="
+            echo "HEALTH CHECK FAILED"
+            echo "=========================================="
+
+            cd /opt/quantum-safe
+
+            docker compose ps
+
+            echo ""
+            echo "=========================================="
+            echo "CONTAINER LOGS"
+            echo "=========================================="
+
+            docker compose logs --tail=100
+
+            exit 1
+
+          EOF
+
+      # ======================================================
+      # 16. Deployment summary
+      # ======================================================
+
+      - name: Deployment Summary
+        env:
+          DEPLOYED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+
+          echo "=========================================="
+          echo "AWS EC2 DEPLOYMENT SUCCESSFUL"
+          echo "=========================================="
+
+          echo ""
+          echo "Commit:"
+          echo "${DEPLOYED_SHA}"
+
+          echo ""
+          echo "Backend:"
+          echo "naveedurehman/enterprise-quantum-safe-backend:${DEPLOYED_SHA}"
+
+          echo ""
+          echo "Frontend:"
+          echo "naveedurehman/enterprise-quantum-safe-frontend:${DEPLOYED_SHA}"
+
+          echo ""
+          echo "EC2:"
+          echo "${{ secrets.EC2_HOST }}"
+
+          echo ""
+          echo "Deployment directory:"
+          echo "/opt/quantum-safe"
+
+          echo ""
+          echo "=========================================="
+          echo "DEPLOYMENT COMPLETE"
+          echo "=========================================="
+```

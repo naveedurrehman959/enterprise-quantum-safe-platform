@@ -51,9 +51,7 @@ services:
 
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: naveedurehman/enterprise-quantum-safe-backend:${IMAGE_TAG}
 
     container_name: quantum-safe-backend
 
@@ -72,9 +70,7 @@ services:
 
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: naveedurehman/enterprise-quantum-safe-frontend:${IMAGE_TAG}
 
     container_name: quantum-safe-frontend
 

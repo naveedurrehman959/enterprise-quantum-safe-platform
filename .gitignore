@@ -48,7 +48,12 @@ frontend/dist/
 # =========================
 .vscode/
 .idea/
+# TLS / SSL private material
+docker/nginx/ssl/server.key
+docker/nginx/ssl/backup/
 
+# Local SSL certificates
+docker/nginx/ssl/server.crt
 # =========================
 # OS files
 # =========================
