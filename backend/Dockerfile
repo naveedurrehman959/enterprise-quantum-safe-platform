@@ -4,7 +4,7 @@ LABEL org.opencontainers.image.source="https://github.com/naveedurrehman959/ente
 
 WORKDIR /app
 
-# Update Debian security packages and remove apt cache
+# Update Debian packages
 RUN apt-get update \
     && apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/*
@@ -13,17 +13,21 @@ RUN apt-get update \
 RUN groupadd --system appgroup \
     && useradd --system --gid appgroup --create-home appuser
 
+# Install Python dependencies
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir --upgrade pip \
+    && python -m pip install --no-cache-dir -r requirements.txt
 
+# Copy application
 COPY . .
 
-# Give application user ownership
+# Application ownership
 RUN chown -R appuser:appgroup /app
 
-# Run application as non-root
+# Run as non-root
 USER appuser
+ 
 
 EXPOSE 5001
 
