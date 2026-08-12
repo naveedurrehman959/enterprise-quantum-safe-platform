@@ -27,10 +27,14 @@ env:
 
 
 # ============================================================
-# 1. DEPENDENCY REVIEW
+# JOBS
 # ============================================================
 
 jobs:
+
+  # ============================================================
+  # 1. DEPENDENCY REVIEW
+  # ============================================================
 
   dependency-review:
     name: Dependency Review
@@ -510,7 +514,7 @@ jobs:
 
 
   # ============================================================
-  # 14. DEPLOY TO TERRAFORM-MANAGED AWS EC2
+  # 14. DEPLOY TO AWS EC2
   # ============================================================
 
   deploy:
@@ -528,53 +532,23 @@ jobs:
     steps:
 
       # --------------------------------------------------------
-      # Checkout
+      # Get EC2 IP from GitHub Secret
       # --------------------------------------------------------
 
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-
-      # --------------------------------------------------------
-      # Setup Terraform
-      # --------------------------------------------------------
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-
-
-      # --------------------------------------------------------
-      # Initialize Terraform
-      # --------------------------------------------------------
-
-      - name: Terraform Init
-        working-directory: terraform
-        run: |
-          echo "Initializing Terraform..."
-          terraform init -input=false
-
-
-      # --------------------------------------------------------
-      # Get EC2 IP from Terraform
-      # --------------------------------------------------------
-
-      - name: Get Terraform EC2 IP
-        id: terraform-output
-        working-directory: terraform
+      - name: Get EC2 Host
+        id: ec2-host
         run: |
 
-          echo "Retrieving EC2 public IP from Terraform..."
+          echo "Retrieving EC2 public IP from GitHub Secret..."
 
-          EC2_IP=$(terraform output -raw public_ip)
-
-          if [ -z "$EC2_IP" ]; then
-            echo "ERROR: Terraform public_ip output is empty."
+          if [ -z "${{ secrets.EC2_HOST }}" ]; then
+            echo "ERROR: EC2_HOST secret is not configured."
             exit 1
           fi
 
-          echo "EC2_IP=$EC2_IP" >> "$GITHUB_OUTPUT"
+          echo "EC2_HOST=${{ secrets.EC2_HOST }}" >> "$GITHUB_OUTPUT"
 
-          echo "Terraform EC2 IP retrieved successfully."
+          echo "EC2 host retrieved successfully."
 
 
       # --------------------------------------------------------
@@ -586,22 +560,23 @@ jobs:
 
           mkdir -p ~/.ssh
 
-          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" \
+            > ~/.ssh/deploy_key
 
           chmod 600 ~/.ssh/deploy_key
 
           ssh-keyscan -H \
-            "${{ steps.terraform-output.outputs.EC2_IP }}" \
+            "${{ steps.ec2-host.outputs.EC2_HOST }}" \
             >> ~/.ssh/known_hosts
 
 
       # --------------------------------------------------------
-      # Deploy containers
+      # Deploy Containers
       # --------------------------------------------------------
 
       - name: Deploy Application
         env:
-          EC2_IP: ${{ steps.terraform-output.outputs.EC2_IP }}
+          EC2_IP: ${{ steps.ec2-host.outputs.EC2_HOST }}
           IMAGE_TAG: ${{ github.sha }}
 
           GHCR_BACKEND: ghcr.io/naveedurrehman959/enterprise-quantum-safe-platform-backend
@@ -674,9 +649,11 @@ jobs:
 
             echo "Deployment containers started."
 
+
             echo "=========================================="
             echo "Running Docker health check"
             echo "=========================================="
+
 
             sleep 15
 
@@ -730,9 +707,11 @@ jobs:
             echo "Deployment Health Check PASSED"
             echo "=========================================="
 
+
             docker ps \
               --filter "name=quantum-safe-backend" \
               --filter "name=quantum-safe-frontend"
+
 
           REMOTE_SCRIPT
 
@@ -787,48 +766,22 @@ jobs:
 
     steps:
 
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-
       # --------------------------------------------------------
-      # Setup Terraform
+      # Get EC2 IP from GitHub Secret
       # --------------------------------------------------------
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-
-
-      # --------------------------------------------------------
-      # Initialize Terraform
-      # --------------------------------------------------------
-
-      - name: Terraform Init
-        working-directory: terraform
-        run: |
-          echo "Initializing Terraform..."
-          terraform init -input=false
-
-
-      # --------------------------------------------------------
-      # Get Terraform EC2 IP
-      # --------------------------------------------------------
-
-      - name: Get Terraform EC2 IP
-        id: terraform-output
-        working-directory: terraform
+      - name: Get EC2 Host
+        id: ec2-host
         run: |
 
-          echo "Retrieving EC2 public IP from Terraform..."
+          echo "Retrieving EC2 public IP from GitHub Secret..."
 
-          EC2_IP=$(terraform output -raw public_ip)
-
-          if [ -z "$EC2_IP" ]; then
-            echo "ERROR: Terraform public_ip output is empty."
+          if [ -z "${{ secrets.EC2_HOST }}" ]; then
+            echo "ERROR: EC2_HOST secret is not configured."
             exit 1
           fi
 
-          echo "EC2_IP=$EC2_IP" >> "$GITHUB_OUTPUT"
+          echo "EC2_HOST=${{ secrets.EC2_HOST }}" >> "$GITHUB_OUTPUT"
 
 
       # --------------------------------------------------------
@@ -846,7 +799,7 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
 
           ssh-keyscan -H \
-            "${{ steps.terraform-output.outputs.EC2_IP }}" \
+            "${{ steps.ec2-host.outputs.EC2_HOST }}" \
             >> ~/.ssh/known_hosts
 
 
@@ -856,7 +809,7 @@ jobs:
 
       - name: Verify Containers
         env:
-          EC2_IP: ${{ steps.terraform-output.outputs.EC2_IP }}
+          EC2_IP: ${{ steps.ec2-host.outputs.EC2_HOST }}
 
         run: |
 
@@ -887,16 +840,24 @@ jobs:
 
 
             if [ "$BACKEND_STATUS" != "running" ]; then
+
               echo "Backend health check FAILED"
+
               docker logs --tail 100 quantum-safe-backend
+
               exit 1
+
             fi
 
 
             if [ "$FRONTEND_STATUS" != "running" ]; then
+
               echo "Frontend health check FAILED"
+
               docker logs --tail 100 quantum-safe-frontend
+
               exit 1
+
             fi
 
 
