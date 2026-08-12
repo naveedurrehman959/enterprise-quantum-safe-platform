@@ -536,7 +536,7 @@ jobs:
 
       - name: Get Terraform EC2 IP
         id: terraform-output
-        working-directory: terraform
+        working-directory: infrastructure/terraform
         run: |
           echo "Retrieving EC2 public IP from Terraform..."
 
