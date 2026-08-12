@@ -5,8 +5,6 @@ LABEL org.opencontainers.image.source="https://github.com/naveedurrehman959/ente
 WORKDIR /app
 
 # Update Debian packages
-RUN apt-get update \
-    && rm -rf /var/lib/apt/lists/*
 
 # Create non-root application user
 RUN groupadd --system appgroup \
@@ -14,9 +12,7 @@ RUN groupadd --system appgroup \
 
 # Install Python dependencies
 COPY requirements.txt .
-
-RUN python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip install --no-cache-dir -r requirements.txt
+RUN  python -m pip install --no-cache-dir -r requirements.txt
 
 # Copy application
 COPY . .
