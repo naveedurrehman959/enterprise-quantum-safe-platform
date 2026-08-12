@@ -1,4 +1,3 @@
-
 name: Enterprise Quantum-Safe DevSecOps
 
 on:
@@ -302,12 +301,11 @@ jobs:
 
       - name: Trivy Configuration Scan
         uses: aquasecurity/trivy-action@v0.36.0
-        continue-on-error: true
         with:
           scan-type: config
           scan-ref: .
           severity: HIGH,CRITICAL
-          exit-code: "0"
+          exit-code: "1"
           ignore-unfixed: true
 
 
@@ -381,29 +379,51 @@ jobs:
         run: |
           docker load -i docker-images.tar
 
+      # --------------------------------------------------------
+      # Backend Image Scan
+      # --------------------------------------------------------
+
       - name: Scan Backend Image
         uses: aquasecurity/trivy-action@v0.36.0
-        continue-on-error: true
         with:
           image-ref: enterprise-quantum-safe-backend:${{ github.sha }}
           scanners: vuln
           pkg-types: library
           severity: HIGH,CRITICAL
           ignore-unfixed: false
-          exit-code: "0"
+          exit-code: "1"
           format: table
+
+      # --------------------------------------------------------
+      # Frontend Image Scan
+      # --------------------------------------------------------
 
       - name: Scan Frontend Image
         uses: aquasecurity/trivy-action@v0.36.0
-        continue-on-error: true
         with:
           image-ref: enterprise-quantum-safe-frontend:${{ github.sha }}
           scanners: vuln
           pkg-types: library
           severity: HIGH,CRITICAL
           ignore-unfixed: false
-          exit-code: "0"
+          exit-code: "1"
           format: table
+
+      # --------------------------------------------------------
+      # OS Scan
+      # --------------------------------------------------------
+
+      - name: Trivy - OS Scan
+        run: |
+          trivy image \
+            --scanners vuln \
+            --pkg-types os \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed=true \
+            --exit-code 0 \
+            ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+
+
   # ============================================================
   # 13. PUBLISH IMAGES
   # ============================================================
@@ -513,8 +533,6 @@ jobs:
     needs:
       - publish-images
 
-    # Only deploy from main/master.
-    # Pull requests and develop branches do not deploy.
     if: |
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/main' ||
@@ -531,11 +549,28 @@ jobs:
 
 
       # --------------------------------------------------------
-      # Get EC2 IP from Terraform
+      # Setup Terraform
       # --------------------------------------------------------
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
-      
+
+
+      # --------------------------------------------------------
+      # Initialize Terraform
+      # --------------------------------------------------------
+
+      - name: Initialize Terraform
+        working-directory: terraform
+        run: |
+          echo "Initializing Terraform..."
+          terraform init -input=false
+
+
+      # --------------------------------------------------------
+      # Get EC2 IP from Terraform
+      # --------------------------------------------------------
+
       - name: Get Terraform EC2 IP
         id: terraform-output
         working-directory: terraform
@@ -551,6 +586,8 @@ jobs:
 
           echo "EC2_IP=$EC2_IP" >> "$GITHUB_OUTPUT"
 
+          echo "EC2 public IP retrieved successfully."
+
 
       # --------------------------------------------------------
       # Configure SSH
@@ -561,7 +598,8 @@ jobs:
 
           mkdir -p ~/.ssh
 
-          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" \
+            > ~/.ssh/deploy_key
 
           chmod 600 ~/.ssh/deploy_key
 
@@ -657,12 +695,14 @@ jobs:
 
 
             echo "Backend container status:"
+
             docker inspect \
               --format='{{.State.Status}}' \
               quantum-safe-backend
 
 
             echo "Frontend container status:"
+
             docker inspect \
               --format='{{.State.Status}}' \
               quantum-safe-frontend
@@ -702,6 +742,7 @@ jobs:
             echo "=========================================="
             echo "Deployment Health Check PASSED"
             echo "=========================================="
+
 
             docker ps \
               --filter "name=quantum-safe-backend" \
@@ -760,13 +801,43 @@ jobs:
 
     steps:
 
+      # --------------------------------------------------------
+      # Checkout
+      # --------------------------------------------------------
+
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+
+      # --------------------------------------------------------
+      # Setup Terraform
+      # --------------------------------------------------------
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+
+      # --------------------------------------------------------
+      # Initialize Terraform
+      # --------------------------------------------------------
+
+      - name: Initialize Terraform
+        working-directory: terraform
+        run: |
+          echo "Initializing Terraform..."
+          terraform init -input=false
+
+
+      # --------------------------------------------------------
+      # Get Terraform EC2 IP
+      # --------------------------------------------------------
 
       - name: Get Terraform EC2 IP
         id: terraform-output
         working-directory: terraform
         run: |
+
+          echo "Retrieving EC2 public IP from Terraform..."
 
           EC2_IP=$(terraform output -raw public_ip)
 
@@ -777,6 +848,12 @@ jobs:
 
           echo "EC2_IP=$EC2_IP" >> "$GITHUB_OUTPUT"
 
+          echo "EC2 public IP retrieved successfully."
+
+
+      # --------------------------------------------------------
+      # Configure SSH
+      # --------------------------------------------------------
 
       - name: Configure SSH
         run: |
@@ -792,6 +869,10 @@ jobs:
             "${{ steps.terraform-output.outputs.EC2_IP }}" \
             >> ~/.ssh/known_hosts
 
+
+      # --------------------------------------------------------
+      # Verify Containers
+      # --------------------------------------------------------
 
       - name: Verify Containers
         env:
@@ -816,6 +897,7 @@ jobs:
               --format='{{.State.Status}}' \
               quantum-safe-backend)
 
+
             FRONTEND_STATUS=$(docker inspect \
               --format='{{.State.Status}}' \
               quantum-safe-frontend)
@@ -826,16 +908,24 @@ jobs:
 
 
             if [ "$BACKEND_STATUS" != "running" ]; then
+
               echo "Backend health check FAILED"
+
               docker logs --tail 100 quantum-safe-backend
+
               exit 1
+
             fi
 
 
             if [ "$FRONTEND_STATUS" != "running" ]; then
+
               echo "Frontend health check FAILED"
+
               docker logs --tail 100 quantum-safe-frontend
+
               exit 1
+
             fi
 
 
@@ -844,5 +934,3 @@ jobs:
             echo "Deployment verified successfully."
 
           REMOTE_SCRIPT
-
-
