@@ -404,15 +404,6 @@ jobs:
           ignore-unfixed: false
           exit-code: "0"
           format: table
-      - name: Trivy - OS Scan
-        run: |
-          trivy image \
-            --scanners vuln \
-            --pkg-types os \
-            --severity HIGH,CRITICAL \
-            --ignore-unfixed=true \
-            --exit-code 0 \
-           ${{ env.BACKEND_IMAGE }}
   # ============================================================
   # 13. PUBLISH IMAGES
   # ============================================================
