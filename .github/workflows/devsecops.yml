@@ -533,10 +533,12 @@ jobs:
       # --------------------------------------------------------
       # Get EC2 IP from Terraform
       # --------------------------------------------------------
-
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+      
       - name: Get Terraform EC2 IP
         id: terraform-output
-        working-directory: infrastructure/terraform
+        working-directory: terraform
         run: |
           echo "Retrieving EC2 public IP from Terraform..."
 
