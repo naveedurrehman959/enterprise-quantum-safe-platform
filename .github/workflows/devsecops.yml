@@ -20,7 +20,7 @@ env:
   GHCR_REGISTRY: ghcr.io
   GHCR_IMAGE_PREFIX: ghcr.io/naveedurrehman959/enterprise-quantum-safe-platform
 
-  DOCKERHUB_IMAGE_PREFIX: naveedurehman/enterprise-quantum-safe
+  DOCKERHUB_IMAGE_PREFIX: naveedurrehman/enterprise-quantum-safe
 
   BACKEND_IMAGE: enterprise-quantum-safe-backend
   FRONTEND_IMAGE: enterprise-quantum-safe-frontend
@@ -293,6 +293,10 @@ jobs:
 
   # ============================================================
   # 10. IaC / CONFIGURATION SCANNING
+  #
+  # TRIVY POLICY:
+  # WARNING ONLY
+  # NEVER BLOCK PIPELINE
   # ============================================================
 
   iac-scan:
@@ -365,6 +369,10 @@ jobs:
 
   # ============================================================
   # 12. CONTAINER SECURITY SCANNING
+  #
+  # TRIVY POLICY:
+  # WARNING ONLY
+  # NEVER BLOCK PIPELINE
   # ============================================================
 
   container-scan:
@@ -425,7 +433,6 @@ jobs:
       packages: write
 
     steps:
-
       - name: Download Docker Images
         uses: actions/download-artifact@v4
         with:
@@ -434,7 +441,6 @@ jobs:
       - name: Load Docker Images
         run: |
           docker load -i docker-images.tar
-
 
       # --------------------------------------------------------
       # GHCR Login
@@ -447,7 +453,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-
       # --------------------------------------------------------
       # Docker Hub Login
       # --------------------------------------------------------
@@ -458,14 +463,12 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-
       # --------------------------------------------------------
       # Tag Images
       # --------------------------------------------------------
 
       - name: Tag Images
         run: |
-
           docker tag \
             ${{ env.BACKEND_IMAGE }}:${{ github.sha }} \
             ${{ env.GHCR_IMAGE_PREFIX }}-backend:${{ github.sha }}
@@ -482,7 +485,6 @@ jobs:
             ${{ env.FRONTEND_IMAGE }}:${{ github.sha }} \
             ${{ env.DOCKERHUB_IMAGE_PREFIX }}-frontend:${{ github.sha }}
 
-
       # --------------------------------------------------------
       # Push GHCR
       # --------------------------------------------------------
@@ -496,7 +498,6 @@ jobs:
         run: |
           docker push \
             ${{ env.GHCR_IMAGE_PREFIX }}-frontend:${{ github.sha }}
-
 
       # --------------------------------------------------------
       # Push Docker Hub
@@ -515,6 +516,9 @@ jobs:
 
   # ============================================================
   # 14. DEPLOY TO AWS EC2
+  #
+  # EC2_HOST SECRET IS USED DIRECTLY
+  # NO TERRAFORM REQUIRED IN GITHUB ACTIONS
   # ============================================================
 
   deploy:
@@ -532,42 +536,91 @@ jobs:
     steps:
 
       # --------------------------------------------------------
-      # Get EC2 IP from GitHub Secret
+      # Validate Deployment Secrets
       # --------------------------------------------------------
 
-      - name: Get EC2 Host
-        id: ec2-host
+      - name: Validate EC2 Deployment Secrets
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
         run: |
+          echo "Validating deployment configuration..."
 
-          echo "Retrieving EC2 public IP from GitHub Secret..."
-
-          if [ -z "${{ secrets.EC2_HOST }}" ]; then
+          if [ -z "$EC2_HOST" ]; then
             echo "ERROR: EC2_HOST secret is not configured."
             exit 1
           fi
 
-          echo "EC2_HOST=${{ secrets.EC2_HOST }}" >> "$GITHUB_OUTPUT"
+          if [ -z "$EC2_SSH_PRIVATE_KEY" ]; then
+            echo "ERROR: EC2_SSH_PRIVATE_KEY secret is not configured."
+            exit 1
+          fi
 
-          echo "EC2 host retrieved successfully."
+          echo "EC2_HOST is configured."
+          echo "SSH private key is configured."
 
 
       # --------------------------------------------------------
       # Configure SSH
+      #
+      # Uses RUNNER_TEMP instead of ~/.ssh
+      # This avoids the mkdir ~/.ssh failure.
       # --------------------------------------------------------
 
       - name: Configure SSH
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
         run: |
+          set -e
 
-          mkdir -p ~/.ssh
+          echo "Preparing temporary SSH directory..."
 
-          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" \
-            > ~/.ssh/deploy_key
+          SSH_DIR="${RUNNER_TEMP}/enterprise-ssh"
 
-          chmod 600 ~/.ssh/deploy_key
+          mkdir -p "$SSH_DIR"
+          chmod 700 "$SSH_DIR"
 
-          ssh-keyscan -H \
-            "${{ steps.ec2-host.outputs.EC2_HOST }}" \
-            >> ~/.ssh/known_hosts
+          echo "Writing deployment SSH key..."
+
+          printf '%s\n' "$EC2_SSH_PRIVATE_KEY" > "$SSH_DIR/deploy_key"
+
+          chmod 600 "$SSH_DIR/deploy_key"
+
+          echo "Scanning EC2 SSH host key..."
+
+          ssh-keyscan -H "$EC2_HOST" > "$SSH_DIR/known_hosts" 2>/dev/null
+
+          if [ ! -s "$SSH_DIR/known_hosts" ]; then
+            echo "ERROR: Could not retrieve SSH host key from EC2."
+            exit 1
+          fi
+
+          echo "SSH configuration completed."
+
+          echo "SSH_DIR=$SSH_DIR" >> "$GITHUB_ENV"
+
+
+      # --------------------------------------------------------
+      # Test SSH Connection
+      # --------------------------------------------------------
+
+      - name: Test EC2 SSH Connection
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          set -e
+
+          echo "Testing SSH connection to EC2..."
+
+          ssh \
+            -i "$SSH_DIR/deploy_key" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
+            ubuntu@"$EC2_HOST" \
+            "echo 'EC2 SSH connection successful.'"
 
 
       # --------------------------------------------------------
@@ -576,7 +629,7 @@ jobs:
 
       - name: Deploy Application
         env:
-          EC2_IP: ${{ steps.ec2-host.outputs.EC2_HOST }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
           IMAGE_TAG: ${{ github.sha }}
 
           GHCR_BACKEND: ghcr.io/naveedurrehman959/enterprise-quantum-safe-platform-backend
@@ -586,11 +639,17 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
         run: |
+          set -e
+
+          echo "=========================================="
+          echo "Quantum-Safe Platform Deployment"
+          echo "=========================================="
 
           ssh \
-            -i ~/.ssh/deploy_key \
+            -i "$SSH_DIR/deploy_key" \
             -o StrictHostKeyChecking=yes \
-            ubuntu@"$EC2_IP" \
+            -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
+            ubuntu@"$EC2_HOST" \
             "GHCR_BACKEND='$GHCR_BACKEND' \
              GHCR_FRONTEND='$GHCR_FRONTEND' \
              IMAGE_TAG='$IMAGE_TAG' \
@@ -598,120 +657,117 @@ jobs:
              GHCR_TOKEN='$GHCR_TOKEN' \
              bash -s" <<'REMOTE_SCRIPT'
 
-            set -e
+          set -e
 
-            echo "=========================================="
-            echo "Quantum-Safe Platform Deployment"
-            echo "=========================================="
+          echo "=========================================="
+          echo "Logging into GitHub Container Registry"
+          echo "=========================================="
 
-            echo "Logging into GHCR..."
-
-            echo "$GHCR_TOKEN" | docker login ghcr.io \
-              -u "$GHCR_USERNAME" \
-              --password-stdin
+          echo "$GHCR_TOKEN" | docker login ghcr.io \
+            -u "$GHCR_USERNAME" \
+            --password-stdin
 
 
-            echo "Pulling backend image..."
+          echo "=========================================="
+          echo "Pulling Backend Image"
+          echo "=========================================="
 
-            docker pull \
-              "$GHCR_BACKEND:$IMAGE_TAG"
-
-
-            echo "Pulling frontend image..."
-
-            docker pull \
-              "$GHCR_FRONTEND:$IMAGE_TAG"
+          docker pull \
+            "$GHCR_BACKEND:$IMAGE_TAG"
 
 
-            echo "Stopping previous containers..."
+          echo "=========================================="
+          echo "Pulling Frontend Image"
+          echo "=========================================="
 
-            docker rm -f quantum-safe-backend 2>/dev/null || true
-            docker rm -f quantum-safe-frontend 2>/dev/null || true
-
-
-            echo "Starting backend..."
-
-            docker run -d \
-              --name quantum-safe-backend \
-              --restart unless-stopped \
-              -p 5001:5001 \
-              "$GHCR_BACKEND:$IMAGE_TAG"
+          docker pull \
+            "$GHCR_FRONTEND:$IMAGE_TAG"
 
 
-            echo "Starting frontend..."
+          echo "=========================================="
+          echo "Stopping Previous Containers"
+          echo "=========================================="
 
-            docker run -d \
-              --name quantum-safe-frontend \
-              --restart unless-stopped \
-              -p 80:80 \
-              "$GHCR_FRONTEND:$IMAGE_TAG"
-
-
-            echo "Deployment containers started."
+          docker rm -f quantum-safe-backend 2>/dev/null || true
+          docker rm -f quantum-safe-frontend 2>/dev/null || true
 
 
-            echo "=========================================="
-            echo "Running Docker health check"
-            echo "=========================================="
+          echo "=========================================="
+          echo "Starting Backend"
+          echo "=========================================="
+
+          docker run -d \
+            --name quantum-safe-backend \
+            --restart unless-stopped \
+            -p 5001:5001 \
+            "$GHCR_BACKEND:$IMAGE_TAG"
 
 
-            sleep 15
+          echo "=========================================="
+          echo "Starting Frontend"
+          echo "=========================================="
+
+          docker run -d \
+            --name quantum-safe-frontend \
+            --restart unless-stopped \
+            -p 80:80 \
+            "$GHCR_FRONTEND:$IMAGE_TAG"
 
 
-            echo "Backend container status:"
+          echo "=========================================="
+          echo "Containers Started"
+          echo "=========================================="
 
-            docker inspect \
-              --format='{{.State.Status}}' \
-              quantum-safe-backend
-
-
-            echo "Frontend container status:"
-
-            docker inspect \
-              --format='{{.State.Status}}' \
-              quantum-safe-frontend
+          docker ps \
+            --filter "name=quantum-safe-backend" \
+            --filter "name=quantum-safe-frontend"
 
 
-            BACKEND_STATUS=$(docker inspect \
-              --format='{{.State.Status}}' \
-              quantum-safe-backend)
+          echo "=========================================="
+          echo "Running Docker Health Check"
+          echo "=========================================="
 
-            FRONTEND_STATUS=$(docker inspect \
-              --format='{{.State.Status}}' \
-              quantum-safe-frontend)
+          sleep 15
 
 
-            if [ "$BACKEND_STATUS" != "running" ]; then
+          BACKEND_STATUS=$(docker inspect \
+            --format='{{.State.Status}}' \
+            quantum-safe-backend)
 
-              echo "ERROR: Backend container is not running."
-
-              docker logs --tail 100 quantum-safe-backend
-
-              exit 1
-
-            fi
+          FRONTEND_STATUS=$(docker inspect \
+            --format='{{.State.Status}}' \
+            quantum-safe-frontend)
 
 
-            if [ "$FRONTEND_STATUS" != "running" ]; then
-
-              echo "ERROR: Frontend container is not running."
-
-              docker logs --tail 100 quantum-safe-frontend
-
-              exit 1
-
-            fi
+          echo "Backend status:  $BACKEND_STATUS"
+          echo "Frontend status: $FRONTEND_STATUS"
 
 
-            echo "=========================================="
-            echo "Deployment Health Check PASSED"
-            echo "=========================================="
+          if [ "$BACKEND_STATUS" != "running" ]; then
+            echo "ERROR: Backend container is not running."
+
+            docker logs --tail 100 quantum-safe-backend
+
+            exit 1
+          fi
 
 
-            docker ps \
-              --filter "name=quantum-safe-backend" \
-              --filter "name=quantum-safe-frontend"
+          if [ "$FRONTEND_STATUS" != "running" ]; then
+            echo "ERROR: Frontend container is not running."
 
+            docker logs --tail 100 quantum-safe-frontend
+
+            exit 1
+          fi
+
+
+          echo "=========================================="
+          echo "Deployment Health Check PASSED"
+          echo "=========================================="
+
+          docker ps \
+            --filter "name=quantum-safe-backend" \
+            --filter "name=quantum-safe-frontend"
 
           REMOTE_SCRIPT
 
@@ -722,7 +778,6 @@ jobs:
 
       - name: Deployment Summary
         run: |
-
           echo "=========================================="
           echo "DEPLOYMENT SUCCESSFUL"
           echo "=========================================="
@@ -750,6 +805,9 @@ jobs:
 
   # ============================================================
   # 15. POST-DEPLOYMENT HEALTH CHECK
+  #
+  # Uses EC2_HOST directly.
+  # NO TERRAFORM REQUIRED.
   # ============================================================
 
   deployment-health:
@@ -767,21 +825,27 @@ jobs:
     steps:
 
       # --------------------------------------------------------
-      # Get EC2 IP from GitHub Secret
+      # Validate Secrets
       # --------------------------------------------------------
 
-      - name: Get EC2 Host
-        id: ec2-host
+      - name: Validate EC2 Deployment Secrets
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
         run: |
+          set -e
 
-          echo "Retrieving EC2 public IP from GitHub Secret..."
-
-          if [ -z "${{ secrets.EC2_HOST }}" ]; then
+          if [ -z "$EC2_HOST" ]; then
             echo "ERROR: EC2_HOST secret is not configured."
             exit 1
           fi
 
-          echo "EC2_HOST=${{ secrets.EC2_HOST }}" >> "$GITHUB_OUTPUT"
+          if [ -z "$EC2_SSH_PRIVATE_KEY" ]; then
+            echo "ERROR: EC2_SSH_PRIVATE_KEY secret is not configured."
+            exit 1
+          fi
+
+          echo "Deployment secrets are configured."
 
 
       # --------------------------------------------------------
@@ -789,18 +853,29 @@ jobs:
       # --------------------------------------------------------
 
       - name: Configure SSH
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
         run: |
+          set -e
 
-          mkdir -p ~/.ssh
+          SSH_DIR="${RUNNER_TEMP}/enterprise-health-ssh"
 
-          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" \
-            > ~/.ssh/deploy_key
+          mkdir -p "$SSH_DIR"
+          chmod 700 "$SSH_DIR"
 
-          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$EC2_SSH_PRIVATE_KEY" > "$SSH_DIR/deploy_key"
 
-          ssh-keyscan -H \
-            "${{ steps.ec2-host.outputs.EC2_HOST }}" \
-            >> ~/.ssh/known_hosts
+          chmod 600 "$SSH_DIR/deploy_key"
+
+          ssh-keyscan -H "$EC2_HOST" > "$SSH_DIR/known_hosts" 2>/dev/null
+
+          if [ ! -s "$SSH_DIR/known_hosts" ]; then
+            echo "ERROR: Could not retrieve EC2 SSH host key."
+            exit 1
+          fi
+
+          echo "SSH_DIR=$SSH_DIR" >> "$GITHUB_ENV"
 
 
       # --------------------------------------------------------
@@ -809,60 +884,67 @@ jobs:
 
       - name: Verify Containers
         env:
-          EC2_IP: ${{ steps.ec2-host.outputs.EC2_HOST }}
-
+          EC2_HOST: ${{ secrets.EC2_HOST }}
         run: |
+          set -e
+
+          echo "=========================================="
+          echo "Remote Container Health Check"
+          echo "=========================================="
 
           ssh \
-            -i ~/.ssh/deploy_key \
+            -i "$SSH_DIR/deploy_key" \
+            -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
-            ubuntu@"$EC2_IP" \
+            -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
+            ubuntu@"$EC2_HOST" \
             bash -s <<'REMOTE_SCRIPT'
 
-            set -e
+          set -e
 
-            echo "=========================================="
-            echo "Remote Container Health Check"
-            echo "=========================================="
+          BACKEND_STATUS=$(docker inspect \
+            --format='{{.State.Status}}' \
+            quantum-safe-backend)
 
-
-            BACKEND_STATUS=$(docker inspect \
-              --format='{{.State.Status}}' \
-              quantum-safe-backend)
-
-            FRONTEND_STATUS=$(docker inspect \
-              --format='{{.State.Status}}' \
-              quantum-safe-frontend)
+          FRONTEND_STATUS=$(docker inspect \
+            --format='{{.State.Status}}' \
+            quantum-safe-frontend)
 
 
-            echo "Backend:  $BACKEND_STATUS"
-            echo "Frontend: $FRONTEND_STATUS"
+          echo "Backend:  $BACKEND_STATUS"
+          echo "Frontend: $FRONTEND_STATUS"
 
 
-            if [ "$BACKEND_STATUS" != "running" ]; then
+          if [ "$BACKEND_STATUS" != "running" ]; then
+            echo "Backend health check FAILED"
 
-              echo "Backend health check FAILED"
+            docker logs --tail 100 quantum-safe-backend
 
-              docker logs --tail 100 quantum-safe-backend
-
-              exit 1
-
-            fi
+            exit 1
+          fi
 
 
-            if [ "$FRONTEND_STATUS" != "running" ]; then
+          if [ "$FRONTEND_STATUS" != "running" ]; then
+            echo "Frontend health check FAILED"
 
-              echo "Frontend health check FAILED"
+            docker logs --tail 100 quantum-safe-frontend
 
-              docker logs --tail 100 quantum-safe-frontend
-
-              exit 1
-
-            fi
+            exit 1
+          fi
 
 
-            echo ""
-            echo "Docker containers are healthy."
-            echo "Deployment verified successfully."
+          echo ""
+          echo "Docker containers are healthy."
+          echo "Deployment verified successfully."
+
+
+          echo ""
+          echo "=========================================="
+          echo "FINAL DEPLOYMENT STATUS"
+          echo "=========================================="
+
+          docker ps \
+            --filter "name=quantum-safe-backend" \
+            --filter "name=quantum-safe-frontend"
 
           REMOTE_SCRIPT
