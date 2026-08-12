@@ -14,5 +14,7 @@ psycopg2-binary
 reportlab
 pandas
 pytest
-cryptography
+cryptography==50.0.0
 APScheduler==3.11.0
+msgpack==1.2.1
+setuptools==84.0.0

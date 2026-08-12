@@ -3,3 +3,7 @@ __pycache__
 .venv
 .git
 instance
+backend-sbom.json
+backend-trivy.json
+sbom-cyclonedx.json
+trivy*.json

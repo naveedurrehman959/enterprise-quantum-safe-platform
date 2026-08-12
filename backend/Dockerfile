@@ -6,7 +6,6 @@ WORKDIR /app
 
 # Update Debian packages
 RUN apt-get update \
-    && apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root application user
@@ -17,8 +16,6 @@ RUN groupadd --system appgroup \
 COPY requirements.txt .
 
 RUN python -m pip install --no-cache-dir --upgrade pip \
-    setuptools \
-    wheel \
     && python -m pip install --no-cache-dir -r requirements.txt
 
 # Copy application

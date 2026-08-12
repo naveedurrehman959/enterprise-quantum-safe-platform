@@ -36,7 +36,12 @@ backend/instance/
 *.db
 *.sqlite3
 
-# =========================
+# =================
+backend-trivy.json
+frontend-trivy.json
+*-trivy.json
+*-sbom.json
+========
 # Node.js
 # =========================
 node_modules/

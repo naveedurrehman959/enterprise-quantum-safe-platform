@@ -379,39 +379,37 @@ jobs:
       - name: Load Docker Images
         run: |
           docker load -i docker-images.tar
-<<<<<<< HEAD
 
       - name: Scan Backend Image
-=======
-      - name: Scan Backend Application Dependencies
->>>>>>> 1ff0ed9 (fix unnecessarally vuln issue)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: enterprise-quantum-safe-backend:${{ github.sha }}
           scanners: vuln
           pkg-types: library
-          severity: CRITICAL,HIGH
+          severity: HIGH,CRITICAL
           ignore-unfixed: false
           exit-code: "1"
-<<<<<<< HEAD
-          ignore-unfixed: true
+          format: table
 
       - name: Scan Frontend Image
-=======
-          format: table
-      - name: Scan Frontend Application Dependencies
->>>>>>> 1ff0ed9 (fix unnecessarally vuln issue)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: enterprise-quantum-safe-frontend:${{ github.sha }}
           scanners: vuln
           pkg-types: library
-          severity: CRITICAL,HIGH
+          severity: HIGH,CRITICAL
           ignore-unfixed: false
           exit-code: "1"
           format: table
-      
-
+      - name: Trivy - OS Scan
+        run: |
+          trivy image \
+            --scanners vuln \
+            --pkg-types os \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed=true \
+            --exit-code 0 \
+           ${{ env.BACKEND_IMAGE }}
   # ============================================================
   # 13. PUBLISH IMAGES
   # ============================================================
