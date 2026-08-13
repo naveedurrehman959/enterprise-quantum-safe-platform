@@ -623,7 +623,6 @@ jobs:
 
           echo "SSH configuration completed successfully."
 
-
       # --------------------------------------------------------
       # Deploy Application
       # --------------------------------------------------------
@@ -661,256 +660,85 @@ jobs:
 
           set -e
 
-          echo "Logging into GHCR..."
+          echo "=========================================="
+          echo "Logging into GHCR"
+          echo "=========================================="
 
           echo "$GHCR_TOKEN" | docker login ghcr.io \
             -u "$GHCR_USERNAME" \
             --password-stdin
 
 
-          echo "Pulling backend image..."
+          echo "=========================================="
+          echo "Pulling backend image"
+          echo "=========================================="
 
           docker pull \
             "$GHCR_BACKEND:$IMAGE_TAG"
 
 
-          echo "Pulling frontend image..."
+          echo "=========================================="
+          echo "Pulling frontend image"
+          echo "=========================================="
 
           docker pull \
             "$GHCR_FRONTEND:$IMAGE_TAG"
 
 
-          echo "Stopping previous containers..."
+          echo "=========================================="
+          echo "Creating Docker network"
+          echo "=========================================="
+
+          docker network create quantum-safe-network 2>/dev/null || true
+
+          echo "Docker network:"
+          docker network inspect quantum-safe-network \
+            --format='{{.Name}}'
+
+
+          echo "=========================================="
+          echo "Stopping previous containers"
+          echo "=========================================="
 
           docker rm -f quantum-safe-backend 2>/dev/null || true
           docker rm -f quantum-safe-frontend 2>/dev/null || true
 
 
-          echo "Starting backend..."
+          echo "=========================================="
+          echo "Starting backend"
+          echo "=========================================="
 
           docker run -d \
             --name quantum-safe-backend \
             --restart unless-stopped \
+            --network quantum-safe-network \
             -p 5001:5001 \
             "$GHCR_BACKEND:$IMAGE_TAG"
 
 
-          echo "Starting frontend..."
+          echo "=========================================="
+          echo "Starting frontend"
+          echo "=========================================="
 
           docker run -d \
             --name quantum-safe-frontend \
             --restart unless-stopped \
+            --network quantum-safe-network \
             -p 80:80 \
             "$GHCR_FRONTEND:$IMAGE_TAG"
 
 
-          echo "Containers started."
+          echo "=========================================="
+          echo "Containers started"
+          echo "=========================================="
 
           echo "Waiting for containers..."
-
           sleep 15
 
 
-          BACKEND_STATUS=$(docker inspect \
-            --format='{{.State.Status}}' \
-            quantum-safe-backend)
-
-          FRONTEND_STATUS=$(docker inspect \
-            --format='{{.State.Status}}' \
-            quantum-safe-frontend)
-
-
-          echo "Backend: $BACKEND_STATUS"
-          echo "Frontend: $FRONTEND_STATUS"
-
-
-          if [ "$BACKEND_STATUS" != "running" ]; then
-            echo "ERROR: Backend container is not running."
-            docker logs --tail 100 quantum-safe-backend
-            exit 1
-          fi
-
-
-          if [ "$FRONTEND_STATUS" != "running" ]; then
-            echo "ERROR: Frontend container is not running."
-            docker logs --tail 100 quantum-safe-frontend
-            exit 1
-          fi
-
-
           echo "=========================================="
-          echo "Deployment Health Check PASSED"
+          echo "Checking container status"
           echo "=========================================="
-
-
-          docker ps \
-            --filter "name=quantum-safe-backend" \
-            --filter "name=quantum-safe-frontend"
-
-          REMOTE_SCRIPT
-
-
-      # --------------------------------------------------------
-      # Deployment Summary
-      # --------------------------------------------------------
-
-      - name: Deployment Summary
-        run: |
-          echo "=========================================="
-          echo "DEPLOYMENT SUCCESSFUL"
-          echo "=========================================="
-
-          echo "Commit:"
-          echo "${{ github.sha }}"
-
-          echo "Environment:"
-          echo "AWS EC2"
-
-          echo "Deployment method:"
-          echo "SSH + Docker"
-
-          echo "Backend image:"
-          echo "${{ env.GHCR_IMAGE_PREFIX }}-backend:${{ github.sha }}"
-
-          echo "Frontend image:"
-          echo "${{ env.GHCR_IMAGE_PREFIX }}-frontend:${{ github.sha }}"
-
-          echo "Health check:"
-          echo "Docker container status = RUNNING"
-
-          echo "=========================================="
-
-
-  # ============================================================
-  # 15. POST-DEPLOYMENT HEALTH CHECK
-  # ============================================================
-
-  deployment-health:
-    name: Post Deployment Health Check
-    runs-on: ubuntu-latest
-
-    needs:
-      - deploy
-
-    if: |
-      github.event_name == 'push' &&
-      (github.ref == 'refs/heads/main' ||
-       github.ref == 'refs/heads/master')
-
-    steps:
-
-      # --------------------------------------------------------
-      # Validate EC2 configuration
-      # --------------------------------------------------------
-
-      - name: Validate EC2 Configuration
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
-          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-        run: |
-          set -e
-
-          if [ -z "$EC2_HOST" ]; then
-            echo "ERROR: EC2_HOST secret is not configured."
-            exit 1
-          fi
-
-          if [ -z "$EC2_USERNAME" ]; then
-            echo "ERROR: EC2_USERNAME secret is not configured."
-            exit 1
-          fi
-
-          if [ -z "$EC2_SSH_KEY" ]; then
-            echo "ERROR: EC2_SSH_KEY secret is not configured."
-            exit 1
-          fi
-
-          echo "EC2 configuration detected."
-
-
-      # --------------------------------------------------------
-      # Configure SSH
-      # --------------------------------------------------------
-
-      - name: Configure SSH
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-        run: |
-          set -e
-
-          echo "Configuring SSH..."
-
-          mkdir -p "$HOME/.ssh"
-          chmod 700 "$HOME/.ssh"
-
-          printf '%s\n' "$EC2_SSH_KEY" > "$HOME/.ssh/deploy_key"
-
-          chmod 600 "$HOME/.ssh/deploy_key"
-
-          echo "Checking SSH private key format..."
-
-          if ! ssh-keygen -y -f "$HOME/.ssh/deploy_key" > /dev/null 2>&1; then
-            echo "ERROR: EC2_SSH_KEY is not a valid SSH private key."
-            exit 1
-          fi
-
-          echo "SSH private key format is valid."
-
-          echo "Scanning EC2 host..."
-
-          ssh-keyscan \
-            -T 15 \
-            -H "$EC2_HOST" \
-            > "$HOME/.ssh/known_hosts"
-
-          if [ ! -s "$HOME/.ssh/known_hosts" ]; then
-            echo "ERROR: ssh-keyscan returned no host key."
-            echo "Check EC2_HOST and that port 22 is reachable."
-            exit 1
-          fi
-
-          chmod 644 "$HOME/.ssh/known_hosts"
-
-          echo "SSH configuration completed successfully."
-
-
-      # --------------------------------------------------------
-      # Verify containers
-      # --------------------------------------------------------
-
-      - name: Verify Containers
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
-        run: |
-          set -e
-
-          ssh \
-            -i "$HOME/.ssh/deploy_key" \
-            -o StrictHostKeyChecking=yes \
-            "$EC2_USERNAME@$EC2_HOST" \
-            bash -s <<'REMOTE_SCRIPT'
-
-          set -e
-
-          echo "=========================================="
-          echo "Remote Container Health Check"
-          echo "=========================================="
-
-
-          if ! docker inspect quantum-safe-backend >/dev/null 2>&1; then
-            echo "ERROR: Backend container does not exist."
-            exit 1
-          fi
-
-
-          if ! docker inspect quantum-safe-frontend >/dev/null 2>&1; then
-            echo "ERROR: Frontend container does not exist."
-            exit 1
-          fi
-
 
           BACKEND_STATUS=$(docker inspect \
             --format='{{.State.Status}}' \
@@ -926,23 +754,80 @@ jobs:
 
 
           if [ "$BACKEND_STATUS" != "running" ]; then
-            echo "Backend health check FAILED"
+
+            echo "ERROR: Backend container is not running."
+
             docker logs --tail 100 quantum-safe-backend
+
             exit 1
+
           fi
 
 
           if [ "$FRONTEND_STATUS" != "running" ]; then
-            echo "Frontend health check FAILED"
+
+            echo "ERROR: Frontend container is not running."
+
             docker logs --tail 100 quantum-safe-frontend
+
             exit 1
+
           fi
 
 
-          echo ""
-          echo "Docker containers are healthy."
-          echo "Deployment verified successfully."
+          echo "=========================================="
+          echo "Testing Docker DNS"
+          echo "=========================================="
+
+          docker exec quantum-safe-frontend \
+            getent hosts quantum-safe-backend || {
+
+              echo "ERROR: Frontend cannot resolve backend hostname."
+
+              docker network inspect quantum-safe-network
+
+              exit 1
+          }
+
+
+          echo "Backend hostname resolved successfully."
+
 
           echo "=========================================="
+          echo "Testing Backend Connectivity"
+          echo "=========================================="
+
+          docker exec quantum-safe-frontend \
+            wget -qO- http://quantum-safe-backend:5001/health || {
+
+              echo "WARNING: Backend health endpoint did not respond."
+
+              echo "Backend logs:"
+              docker logs --tail 100 quantum-safe-backend
+
+              exit 1
+          }
+
+
+          echo "Backend is reachable from frontend."
+
+
+          echo "=========================================="
+          echo "Deployment Health Check PASSED"
+          echo "=========================================="
+
+
+          docker ps \
+            --filter "name=quantum-safe-backend" \
+            --filter "name=quantum-safe-frontend"
+
+
+          echo "=========================================="
+          echo "Network Configuration"
+          echo "=========================================="
+
+          docker network inspect quantum-safe-network \
+            --format='{{range .Containers}}{{.Name}} {{end}}'
+
 
           REMOTE_SCRIPT
