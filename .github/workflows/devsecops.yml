@@ -577,7 +577,6 @@ jobs:
 
           echo "EC2 deployment configuration detected."
 
-
       # --------------------------------------------------------
       # Configure SSH
       # --------------------------------------------------------
@@ -585,6 +584,7 @@ jobs:
       - name: Configure SSH
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
           set -e
@@ -608,10 +608,15 @@ jobs:
 
           echo "Scanning EC2 host..."
 
+          rm -f "$HOME/.ssh/known_hosts"
+
           ssh-keyscan \
             -T 15 \
-            -H "$EC2_HOST" \
-            > "$HOME/.ssh/known_hosts"
+            -H \
+            -q \
+            "$EC2_HOST" \
+            > "$HOME/.ssh/known_hosts" \
+            2>/dev/null
 
           if [ ! -s "$HOME/.ssh/known_hosts" ]; then
             echo "ERROR: ssh-keyscan returned no host key."
@@ -621,7 +626,18 @@ jobs:
 
           chmod 644 "$HOME/.ssh/known_hosts"
 
-          cho "SSH configuration completed successfully."
+          echo "SSH host key successfully added."
+
+          echo "Testing SSH connection..."
+
+          ssh \
+            -i "$HOME/.ssh/deploy_key" \
+            -o StrictHostKeyChecking=yes \
+            -o BatchMode=yes \
+            "$EC2_USERNAME@$EC2_HOST" \
+            "echo 'SSH connection successful.'"
+
+          echo "SSH configuration completed successfully."
       # --------------------------------------------------------
       # Deploy Application
       # Docker Hub -> EC2 -> Docker Compose
