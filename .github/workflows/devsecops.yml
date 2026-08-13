@@ -609,7 +609,6 @@ jobs:
           echo "Scanning EC2 host..."
 
           ssh-keyscan \
-            -q \
             -T 15 \
             -H "$EC2_HOST" \
             > "$HOME/.ssh/known_hosts"
