@@ -623,8 +623,10 @@ jobs:
 
           echo "SSH configuration completed successfully."
 
+
       # --------------------------------------------------------
       # Deploy Application
+      # Docker Hub -> EC2 -> Docker Compose
       # --------------------------------------------------------
 
       - name: Deploy Application
@@ -634,11 +636,12 @@ jobs:
 
           IMAGE_TAG: ${{ github.sha }}
 
-          GHCR_BACKEND: ghcr.io/naveedurrehman959/enterprise-quantum-safe-platform-backend
-          GHCR_FRONTEND: ghcr.io/naveedurrehman959/enterprise-quantum-safe-platform-frontend
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
-          GHCR_USERNAME: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
 
         run: |
           set -e
@@ -651,124 +654,261 @@ jobs:
             -i "$HOME/.ssh/deploy_key" \
             -o StrictHostKeyChecking=yes \
             "$EC2_USERNAME@$EC2_HOST" \
-            "GHCR_BACKEND='$GHCR_BACKEND' \
-             GHCR_FRONTEND='$GHCR_FRONTEND' \
-             IMAGE_TAG='$IMAGE_TAG' \
-             GHCR_USERNAME='$GHCR_USERNAME' \
-             GHCR_TOKEN='$GHCR_TOKEN' \
+            "IMAGE_TAG='$IMAGE_TAG' \
+             DOCKERHUB_USERNAME='$DOCKERHUB_USERNAME' \
+             DOCKERHUB_TOKEN='$DOCKERHUB_TOKEN' \
+             POSTGRES_DB='$POSTGRES_DB' \
+             POSTGRES_USER='$POSTGRES_USER' \
+             POSTGRES_PASSWORD='$POSTGRES_PASSWORD' \
              bash -s" <<'REMOTE_SCRIPT'
 
           set -e
 
           echo "=========================================="
-          echo "Logging into GHCR"
+          echo "Checking Docker"
           echo "=========================================="
 
-          echo "$GHCR_TOKEN" | docker login ghcr.io \
-            -u "$GHCR_USERNAME" \
+          docker --version
+          docker compose version
+
+
+          echo "=========================================="
+          echo "Preparing deployment directory"
+          echo "=========================================="
+
+          mkdir -p ~/enterprise-quantum-safe-platform
+          cd ~/enterprise-quantum-safe-platform
+
+
+          echo "=========================================="
+          echo "Checking Compose files"
+          echo "=========================================="
+
+          if [ ! -f docker-compose.yml ]; then
+            echo "ERROR: docker-compose.yml not found on EC2."
+            echo "The deployment directory must contain the production Compose configuration."
+            exit 1
+          fi
+
+          if [ ! -f docker/nginx/default.conf ]; then
+            echo "ERROR: NGINX configuration not found."
+            exit 1
+          fi
+
+          if [ ! -f monitoring/prometheus/prometheus.yml ]; then
+            echo "ERROR: Prometheus configuration not found."
+            exit 1
+          fi
+
+
+          echo "Compose files detected."
+
+
+          echo "=========================================="
+          echo "Logging into Docker Hub"
+          echo "=========================================="
+
+          echo "$DOCKERHUB_TOKEN" | docker login \
+            -u "$DOCKERHUB_USERNAME" \
             --password-stdin
 
 
           echo "=========================================="
-          echo "Pulling backend image"
+          echo "Creating production environment"
           echo "=========================================="
 
-          docker pull \
-            "$GHCR_BACKEND:$IMAGE_TAG"
+          cat > .env <<EOF
+          IMAGE_TAG=$IMAGE_TAG
+          POSTGRES_DB=$POSTGRES_DB
+          POSTGRES_USER=$POSTGRES_USER
+          POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+          EOF
 
-
-          echo "=========================================="
-          echo "Pulling frontend image"
-          echo "=========================================="
-
-          docker pull \
-            "$GHCR_FRONTEND:$IMAGE_TAG"
+          chmod 600 .env
 
 
           echo "=========================================="
-          echo "Creating Docker network"
+          echo "Validating Compose configuration"
           echo "=========================================="
 
-          docker network create quantum-safe-network 2>/dev/null || true
+          docker compose config -q
 
-          echo "Docker network:"
-          docker network inspect quantum-safe-network \
-            --format='{{.Name}}'
+          echo "Compose configuration is valid."
 
 
           echo "=========================================="
-          echo "Stopping previous containers"
+          echo "Pulling Docker Hub Images"
           echo "=========================================="
 
-          docker rm -f quantum-safe-backend 2>/dev/null || true
-          docker rm -f quantum-safe-frontend 2>/dev/null || true
-
-
-          echo "=========================================="
-          echo "Starting backend"
-          echo "=========================================="
-
-          docker run -d \
-            --name quantum-safe-backend \
-            --restart unless-stopped \
-            --network quantum-safe-network \
-            -p 5001:5001 \
-            "$GHCR_BACKEND:$IMAGE_TAG"
+          docker compose pull
 
 
           echo "=========================================="
-          echo "Starting frontend"
+          echo "Starting Production Stack"
           echo "=========================================="
 
-          docker run -d \
-            --name quantum-safe-frontend \
-            --restart unless-stopped \
-            --network quantum-safe-network \
-            -p 80:80 \
-            "$GHCR_FRONTEND:$IMAGE_TAG"
+          docker compose up -d
 
 
           echo "=========================================="
-          echo "Containers started"
+          echo "Waiting for Services"
           echo "=========================================="
 
-          echo "Waiting for containers..."
-          sleep 15
+          sleep 20
 
 
           echo "=========================================="
-          echo "Checking container status"
+          echo "Container Status"
+          echo "=========================================="
+
+          docker compose ps
+
+
+          echo "=========================================="
+          echo "Checking PostgreSQL"
+          echo "=========================================="
+
+          POSTGRES_STATUS=$(docker inspect \
+            --format='{{.State.Status}}' \
+            quantum-safe-postgres)
+
+          echo "PostgreSQL: $POSTGRES_STATUS"
+
+          if [ "$POSTGRES_STATUS" != "running" ]; then
+            echo "ERROR: PostgreSQL is not running."
+
+            docker compose logs --tail 100 postgres
+
+            exit 1
+          fi
+
+
+          echo "PostgreSQL container is running."
+
+
+          echo "=========================================="
+          echo "Testing PostgreSQL Readiness"
+          echo "=========================================="
+
+          docker exec quantum-safe-postgres \
+            pg_isready \
+            -U "$POSTGRES_USER" \
+            -d "$POSTGRES_DB"
+
+
+          echo "PostgreSQL is accepting connections."
+
+
+          echo "=========================================="
+          echo "Checking Backend"
           echo "=========================================="
 
           BACKEND_STATUS=$(docker inspect \
             --format='{{.State.Status}}' \
             quantum-safe-backend)
 
+          echo "Backend: $BACKEND_STATUS"
+
+          if [ "$BACKEND_STATUS" != "running" ]; then
+            echo "ERROR: Backend is not running."
+
+            docker compose logs --tail 100 backend
+
+            exit 1
+          fi
+
+
+          echo "Backend container is running."
+
+
+          echo "=========================================="
+          echo "Checking Backend Environment"
+          echo "=========================================="
+
+          docker exec quantum-safe-backend \
+            sh -c 'test -n "$DATABASE_URL"'
+
+          echo "DATABASE_URL is configured."
+
+
+          echo "=========================================="
+          echo "Testing Backend Health"
+          echo "=========================================="
+
+          curl -f http://localhost:5001/health
+
+          echo
+          echo "Backend health check PASSED."
+
+
+          echo "=========================================="
+          echo "Checking Frontend"
+          echo "=========================================="
+
           FRONTEND_STATUS=$(docker inspect \
             --format='{{.State.Status}}' \
             quantum-safe-frontend)
 
-
-          echo "Backend:  $BACKEND_STATUS"
           echo "Frontend: $FRONTEND_STATUS"
 
-
-          if [ "$BACKEND_STATUS" != "running" ]; then
-
-            echo "ERROR: Backend container is not running."
-
-            docker logs --tail 100 quantum-safe-backend
-
-            exit 1
-
-          fi
-
-
           if [ "$FRONTEND_STATUS" != "running" ]; then
+            echo "ERROR: Frontend is not running."
 
-            echo "ERROR: Frontend container is not running."
+            docker compose logs --tail 100 frontend
 
-            docker logs --tail 100 quantum-safe-frontend
+            exit 1
+          fi
+
+
+          echo "Frontend container is running."
+
+
+          echo "=========================================="
+          echo "Testing Frontend"
+          echo "=========================================="
+
+          curl -f -I http://localhost
+
+          echo "Frontend health check PASSED."
+
+
+          echo "=========================================="
+          echo "Testing Frontend -> Backend DNS"
+          echo "=========================================="
+
+          docker exec quantum-safe-frontend \
+            getent hosts quantum-safe-backend
+
+
+          echo "Frontend can resolve backend."
+
+
+          echo "=========================================="
+          echo "Testing Frontend -> Backend Connectivity"
+          echo "=========================================="
+
+          docker exec quantum-safe-frontend \
+            wget -qO- http://quantum-safe-backend:5001/health
+
+
+          echo
+          echo "Frontend -> Backend connectivity PASSED."
+
+
+          echo "=========================================="
+          echo "Checking NGINX"
+          echo "=========================================="
+
+          if docker inspect quantum-safe-nginx \
+            --format='{{.State.Status}}' | grep -q running; then
+
+            echo "NGINX is running."
+
+          else
+
+            echo "ERROR: NGINX is not running."
+
+            docker compose logs --tail 100 nginx
 
             exit 1
 
@@ -776,58 +916,57 @@ jobs:
 
 
           echo "=========================================="
-          echo "Testing Docker DNS"
+          echo "Checking Prometheus"
           echo "=========================================="
 
-          docker exec quantum-safe-frontend \
-            getent hosts quantum-safe-backend || {
+          if docker inspect quantum-safe-prometheus \
+            --format='{{.State.Status}}' | grep -q running; then
 
-              echo "ERROR: Frontend cannot resolve backend hostname."
+            echo "Prometheus is running."
 
-              docker network inspect quantum-safe-network
+          else
 
-              exit 1
-          }
+            echo "WARNING: Prometheus is not running."
 
+            docker compose logs --tail 50 prometheus
 
-          echo "Backend hostname resolved successfully."
-
-
-          echo "=========================================="
-          echo "Testing Backend Connectivity"
-          echo "=========================================="
-
-          docker exec quantum-safe-frontend \
-            wget -qO- http://quantum-safe-backend:5001/health || {
-
-              echo "WARNING: Backend health endpoint did not respond."
-
-              echo "Backend logs:"
-              docker logs --tail 100 quantum-safe-backend
-
-              exit 1
-          }
-
-
-          echo "Backend is reachable from frontend."
+          fi
 
 
           echo "=========================================="
-          echo "Deployment Health Check PASSED"
+          echo "Checking Grafana"
           echo "=========================================="
 
+          if docker inspect quantum-safe-grafana \
+            --format='{{.State.Status}}' | grep -q running; then
 
-          docker ps \
-            --filter "name=quantum-safe-backend" \
-            --filter "name=quantum-safe-frontend"
+            echo "Grafana is running."
+
+          else
+
+            echo "WARNING: Grafana is not running."
+
+            docker compose logs --tail 50 grafana
+
+          fi
 
 
           echo "=========================================="
-          echo "Network Configuration"
+          echo "Checking PostgreSQL Volume"
           echo "=========================================="
 
-          docker network inspect quantum-safe-network \
-            --format='{{range .Containers}}{{.Name}} {{end}}'
+          docker volume ls | grep postgres_data || true
 
+
+          echo "=========================================="
+          echo "FINAL DEPLOYMENT STATUS"
+          echo "=========================================="
+
+          docker compose ps
+
+
+          echo "=========================================="
+          echo "DEPLOYMENT SUCCESSFUL"
+          echo "=========================================="
 
           REMOTE_SCRIPT
