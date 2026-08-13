@@ -529,7 +529,6 @@ jobs:
           docker push \
             ${{ env.DOCKERHUB_IMAGE_PREFIX }}-frontend:${{ github.sha }}
 
-
   # ============================================================
   # 14. DEPLOY TO AWS EC2
   # ============================================================
@@ -558,7 +557,7 @@ jobs:
           EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
-          set -e
+          set -euo pipefail
 
           if [ -z "$EC2_HOST" ]; then
             echo "ERROR: EC2_HOST secret is not configured."
@@ -575,7 +574,7 @@ jobs:
             exit 1
           fi
 
-          echo "EC2 deployment configuration detected."
+          echo "EC2 configuration detected."
 
       # --------------------------------------------------------
       # Configure SSH
@@ -587,9 +586,26 @@ jobs:
           EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
-          set -e
+          set -euo pipefail
 
-          echo "Configuring SSH..."
+          echo "========================================="
+          echo "Configuring SSH"
+          echo "========================================="
+
+          if [ -z "${EC2_HOST:-}" ]; then
+            echo "ERROR: EC2_HOST secret is empty."
+            exit 1
+          fi
+
+          if [ -z "${EC2_USERNAME:-}" ]; then
+            echo "ERROR: EC2_USERNAME secret is empty."
+            exit 1
+          fi
+
+          if [ -z "${EC2_SSH_KEY:-}" ]; then
+            echo "ERROR: EC2_SSH_KEY secret is empty."
+            exit 1
+          fi
 
           mkdir -p "$HOME/.ssh"
           chmod 700 "$HOME/.ssh"
@@ -600,44 +616,91 @@ jobs:
           echo "Checking SSH private key..."
 
           if ! ssh-keygen -y -f "$HOME/.ssh/deploy_key" > /dev/null 2>&1; then
-            echo "ERROR: EC2_SSH_KEY is not a valid SSH private key."
+            echo "ERROR: EC2_SSH_KEY is not a valid private SSH key."
             exit 1
           fi
 
           echo "SSH private key format is valid."
 
-          echo "Scanning EC2 host..."
+          echo "========================================="
+          echo "EC2 Connectivity Diagnostics"
+          echo "========================================="
+
+          echo "EC2 host: $EC2_HOST"
+          echo "EC2 username: $EC2_USERNAME"
+
+          echo ""
+          echo "DNS resolution:"
+
+          if getent hosts "$EC2_HOST"; then
+            echo "DNS resolution successful."
+          else
+            echo "WARNING: DNS resolution failed."
+          fi
+
+          echo ""
+          echo "Testing TCP port 22..."
+
+          if timeout 10 bash -c "</dev/tcp/$EC2_HOST/22" 2>/dev/null; then
+            echo "TCP port 22 is reachable."
+          else
+            echo "ERROR: TCP port 22 is NOT reachable."
+            echo ""
+            echo "Possible causes:"
+            echo "  - EC2 instance is stopped"
+            echo "  - EC2 has no public IP"
+            echo "  - Security Group blocks SSH"
+            echo "  - Network ACL blocks SSH"
+            echo "  - EC2_HOST is incorrect"
+            echo "  - SSH service is not running"
+            exit 1
+          fi
+
+          echo ""
+          echo "Scanning SSH host key..."
 
           rm -f "$HOME/.ssh/known_hosts"
 
-          ssh-keyscan \
+          if ! ssh-keyscan \
             -T 15 \
+            -p 22 \
             -H \
-            -q \
             "$EC2_HOST" \
             > "$HOME/.ssh/known_hosts" \
-            2>/dev/null
+            2>/tmp/ssh-keyscan-error.log; then
+
+            echo "ERROR: ssh-keyscan failed."
+            echo ""
+            echo "ssh-keyscan output:"
+            cat /tmp/ssh-keyscan-error.log || true
+            exit 1
+          fi
 
           if [ ! -s "$HOME/.ssh/known_hosts" ]; then
-            echo "ERROR: ssh-keyscan returned no host key."
-            echo "Check EC2_HOST and that port 22 is reachable."
+            echo "ERROR: No SSH host key was returned."
             exit 1
           fi
 
           chmod 644 "$HOME/.ssh/known_hosts"
 
-          echo "SSH host key successfully added."
+          echo "SSH host key successfully obtained."
 
-          echo "Testing SSH connection..."
+          echo ""
+          echo "========================================="
+          echo "Testing SSH Authentication"
+          echo "========================================="
 
           ssh \
             -i "$HOME/.ssh/deploy_key" \
             -o StrictHostKeyChecking=yes \
             -o BatchMode=yes \
+            -o ConnectTimeout=15 \
             "$EC2_USERNAME@$EC2_HOST" \
-            "echo 'SSH connection successful.'"
+            "echo 'SSH authentication successful.'"
 
+          echo ""
           echo "SSH configuration completed successfully."
+
       # --------------------------------------------------------
       # Deploy Application
       # Docker Hub -> EC2 -> Docker Compose
@@ -664,7 +727,7 @@ jobs:
           TLS_PRIVATE_KEY: ${{ secrets.TLS_PRIVATE_KEY }}
 
         run: |
-          set -e
+          set -euo pipefail
 
           echo "=========================================="
           echo "Quantum-Safe Platform Deployment"
@@ -676,7 +739,6 @@ jobs:
           echo "Target:"
           echo "$EC2_USERNAME@$EC2_HOST"
 
-
           # ======================================================
           # Create SSH environment for remote deployment
           # ======================================================
@@ -684,6 +746,7 @@ jobs:
           ssh \
             -i "$HOME/.ssh/deploy_key" \
             -o StrictHostKeyChecking=yes \
+            -o BatchMode=yes \
             "$EC2_USERNAME@$EC2_HOST" \
             "IMAGE_TAG='$IMAGE_TAG' \
              DOCKERHUB_BACKEND='$DOCKERHUB_BACKEND' \
@@ -697,8 +760,7 @@ jobs:
              TLS_PRIVATE_KEY='$TLS_PRIVATE_KEY' \
              bash -s" <<'REMOTE_SCRIPT'
 
-          set -e
-
+          set -euo pipefail
 
           # ======================================================
           # 1. Check Docker
@@ -711,7 +773,6 @@ jobs:
           docker --version
           docker compose version
 
-
           # ======================================================
           # 2. Prepare deployment directory
           # ======================================================
@@ -723,7 +784,6 @@ jobs:
           mkdir -p ~/enterprise-quantum-safe-platform
 
           cd ~/enterprise-quantum-safe-platform
-
 
           # ======================================================
           # 3. Verify required deployment files
@@ -750,7 +810,6 @@ jobs:
 
           echo "Required configuration files found."
 
-
           # ======================================================
           # 4. Prepare TLS directory
           # ======================================================
@@ -771,9 +830,7 @@ jobs:
           chmod 600 docker/nginx/ssl/server.key
 
           echo "TLS certificate installed."
-
           echo "TLS private key installed securely."
-
 
           # ======================================================
           # 5. Docker Hub Login
@@ -786,7 +843,6 @@ jobs:
           echo "$DOCKERHUB_TOKEN" | docker login \
             -u "$DOCKERHUB_USERNAME" \
             --password-stdin
-
 
           # ======================================================
           # 6. Create production .env
@@ -807,9 +863,8 @@ jobs:
 
           echo "Production environment created."
 
-
           # ======================================================
-          # 7. Validate Compose configuration
+          # 7. Validate Docker Compose
           # ======================================================
 
           echo "=========================================="
@@ -819,7 +874,6 @@ jobs:
           docker compose config -q
 
           echo "Docker Compose configuration is valid."
-
 
           # ======================================================
           # 8. Pull images from Docker Hub
@@ -832,14 +886,12 @@ jobs:
           docker pull \
             "$DOCKERHUB_BACKEND:$IMAGE_TAG"
 
-
           echo "=========================================="
           echo "Pulling Frontend Image"
           echo "=========================================="
 
           docker pull \
             "$DOCKERHUB_FRONTEND:$IMAGE_TAG"
-
 
           # ======================================================
           # 9. Verify images
@@ -860,7 +912,6 @@ jobs:
           echo "Backend image verified."
           echo "Frontend image verified."
 
-
           # ======================================================
           # 10. Start / update complete production stack
           # ======================================================
@@ -870,7 +921,6 @@ jobs:
           echo "=========================================="
 
           docker compose up -d
-
 
           # ======================================================
           # 11. Wait for services
@@ -882,7 +932,6 @@ jobs:
 
           sleep 20
 
-
           # ======================================================
           # 12. Container status
           # ======================================================
@@ -892,7 +941,6 @@ jobs:
           echo "=========================================="
 
           docker compose ps
-
 
           # ======================================================
           # 13. PostgreSQL check
@@ -909,17 +957,12 @@ jobs:
           echo "PostgreSQL: $POSTGRES_STATUS"
 
           if [ "$POSTGRES_STATUS" != "running" ]; then
-
             echo "ERROR: PostgreSQL is not running."
-
             docker compose logs --tail 100 postgres
-
             exit 1
-
           fi
 
           echo "PostgreSQL is running."
-
 
           # ======================================================
           # 14. Backend check
@@ -936,17 +979,12 @@ jobs:
           echo "Backend: $BACKEND_STATUS"
 
           if [ "$BACKEND_STATUS" != "running" ]; then
-
             echo "ERROR: Backend is not running."
-
             docker compose logs --tail 100 backend
-
             exit 1
-
           fi
 
           echo "Backend is running."
-
 
           # ======================================================
           # 15. Frontend check
@@ -963,17 +1001,12 @@ jobs:
           echo "Frontend: $FRONTEND_STATUS"
 
           if [ "$FRONTEND_STATUS" != "running" ]; then
-
             echo "ERROR: Frontend is not running."
-
             docker compose logs --tail 100 frontend
-
             exit 1
-
           fi
 
           echo "Frontend is running."
-
 
           # ======================================================
           # 16. Nginx check
@@ -990,17 +1023,12 @@ jobs:
           echo "Nginx: $NGINX_STATUS"
 
           if [ "$NGINX_STATUS" != "running" ]; then
-
             echo "ERROR: Nginx is not running."
-
             docker compose logs --tail 100 nginx
-
             exit 1
-
           fi
 
           echo "Nginx is running."
-
 
           # ======================================================
           # 17. Prometheus check
@@ -1017,17 +1045,12 @@ jobs:
           echo "Prometheus: $PROMETHEUS_STATUS"
 
           if [ "$PROMETHEUS_STATUS" != "running" ]; then
-
             echo "ERROR: Prometheus is not running."
-
             docker compose logs --tail 100 prometheus
-
             exit 1
-
           fi
 
           echo "Prometheus is running."
-
 
           # ======================================================
           # 18. Grafana check
@@ -1044,17 +1067,12 @@ jobs:
           echo "Grafana: $GRAFANA_STATUS"
 
           if [ "$GRAFANA_STATUS" != "running" ]; then
-
             echo "ERROR: Grafana is not running."
-
             docker compose logs --tail 100 grafana
-
             exit 1
-
           fi
 
           echo "Grafana is running."
-
 
           # ======================================================
           # 19. Backend health
@@ -1068,9 +1086,7 @@ jobs:
             http://localhost:5001/health
 
           echo ""
-
           echo "Backend health check PASSED."
-
 
           # ======================================================
           # 20. Frontend / Nginx HTTP check
@@ -1086,7 +1102,6 @@ jobs:
 
           echo "HTTP endpoint check PASSED."
 
-
           # ======================================================
           # 21. HTTPS check
           # ======================================================
@@ -1101,7 +1116,6 @@ jobs:
 
           echo "HTTPS endpoint check PASSED."
 
-
           # ======================================================
           # 22. Frontend -> Backend DNS
           # ======================================================
@@ -1114,7 +1128,6 @@ jobs:
             getent hosts quantum-safe-backend
 
           echo "Frontend can resolve backend."
-
 
           # ======================================================
           # 23. Frontend -> Backend connectivity
@@ -1129,9 +1142,7 @@ jobs:
             http://quantum-safe-backend:5001/health
 
           echo ""
-
           echo "Frontend -> Backend connectivity PASSED."
-
 
           # ======================================================
           # 24. PostgreSQL volume check
@@ -1143,7 +1154,6 @@ jobs:
 
           docker volume ls | grep postgres_data || true
 
-
           # ======================================================
           # 25. Verify network
           # ======================================================
@@ -1154,7 +1164,6 @@ jobs:
 
           docker network ls
 
-
           # ======================================================
           # 26. Final status
           # ======================================================
@@ -1164,7 +1173,6 @@ jobs:
           echo "=========================================="
 
           docker compose ps
-
 
           echo "=========================================="
           echo "DEPLOYMENT SUCCESSFUL"
