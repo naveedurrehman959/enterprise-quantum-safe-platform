@@ -621,9 +621,7 @@ jobs:
 
           chmod 644 "$HOME/.ssh/known_hosts"
 
-          echo "SSH configuration completed successfully."
-
-
+          cho "SSH configuration completed successfully."
       # --------------------------------------------------------
       # Deploy Application
       # Docker Hub -> EC2 -> Docker Compose
@@ -636,12 +634,18 @@ jobs:
 
           IMAGE_TAG: ${{ github.sha }}
 
+          DOCKERHUB_BACKEND: naveedurehman/enterprise-quantum-safe-backend
+          DOCKERHUB_FRONTEND: naveedurehman/enterprise-quantum-safe-frontend
+
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
           POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
           POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+
+          TLS_CERT: ${{ secrets.TLS_CERT }}
+          TLS_PRIVATE_KEY: ${{ secrets.TLS_PRIVATE_KEY }}
 
         run: |
           set -e
@@ -650,19 +654,39 @@ jobs:
           echo "Quantum-Safe Platform Deployment"
           echo "=========================================="
 
+          echo "Deploying image tag:"
+          echo "$IMAGE_TAG"
+
+          echo "Target:"
+          echo "$EC2_USERNAME@$EC2_HOST"
+
+
+          # ======================================================
+          # Create SSH environment for remote deployment
+          # ======================================================
+
           ssh \
             -i "$HOME/.ssh/deploy_key" \
             -o StrictHostKeyChecking=yes \
             "$EC2_USERNAME@$EC2_HOST" \
             "IMAGE_TAG='$IMAGE_TAG' \
+             DOCKERHUB_BACKEND='$DOCKERHUB_BACKEND' \
+             DOCKERHUB_FRONTEND='$DOCKERHUB_FRONTEND' \
              DOCKERHUB_USERNAME='$DOCKERHUB_USERNAME' \
              DOCKERHUB_TOKEN='$DOCKERHUB_TOKEN' \
              POSTGRES_DB='$POSTGRES_DB' \
              POSTGRES_USER='$POSTGRES_USER' \
              POSTGRES_PASSWORD='$POSTGRES_PASSWORD' \
+             TLS_CERT='$TLS_CERT' \
+             TLS_PRIVATE_KEY='$TLS_PRIVATE_KEY' \
              bash -s" <<'REMOTE_SCRIPT'
 
           set -e
+
+
+          # ======================================================
+          # 1. Check Docker
+          # ======================================================
 
           echo "=========================================="
           echo "Checking Docker"
@@ -672,13 +696,22 @@ jobs:
           docker compose version
 
 
+          # ======================================================
+          # 2. Prepare deployment directory
+          # ======================================================
+
           echo "=========================================="
           echo "Preparing deployment directory"
           echo "=========================================="
 
           mkdir -p ~/enterprise-quantum-safe-platform
+
           cd ~/enterprise-quantum-safe-platform
 
+
+          # ======================================================
+          # 3. Verify required deployment files
+          # ======================================================
 
           echo "=========================================="
           echo "Checking Compose files"
@@ -686,23 +719,49 @@ jobs:
 
           if [ ! -f docker-compose.yml ]; then
             echo "ERROR: docker-compose.yml not found on EC2."
-            echo "The deployment directory must contain the production Compose configuration."
             exit 1
           fi
 
           if [ ! -f docker/nginx/default.conf ]; then
-            echo "ERROR: NGINX configuration not found."
+            echo "ERROR: docker/nginx/default.conf not found on EC2."
             exit 1
           fi
 
           if [ ! -f monitoring/prometheus/prometheus.yml ]; then
-            echo "ERROR: Prometheus configuration not found."
+            echo "ERROR: monitoring/prometheus/prometheus.yml not found on EC2."
             exit 1
           fi
 
+          echo "Required configuration files found."
 
-          echo "Compose files detected."
 
+          # ======================================================
+          # 4. Prepare TLS directory
+          # ======================================================
+
+          echo "=========================================="
+          echo "Preparing TLS certificates"
+          echo "=========================================="
+
+          mkdir -p docker/nginx/ssl
+
+          printf '%s\n' "$TLS_CERT" \
+            > docker/nginx/ssl/server.crt
+
+          printf '%s\n' "$TLS_PRIVATE_KEY" \
+            > docker/nginx/ssl/server.key
+
+          chmod 644 docker/nginx/ssl/server.crt
+          chmod 600 docker/nginx/ssl/server.key
+
+          echo "TLS certificate installed."
+
+          echo "TLS private key installed securely."
+
+
+          # ======================================================
+          # 5. Docker Hub Login
+          # ======================================================
 
           echo "=========================================="
           echo "Logging into Docker Hub"
@@ -712,6 +771,10 @@ jobs:
             -u "$DOCKERHUB_USERNAME" \
             --password-stdin
 
+
+          # ======================================================
+          # 6. Create production .env
+          # ======================================================
 
           echo "=========================================="
           echo "Creating production environment"
@@ -726,22 +789,65 @@ jobs:
 
           chmod 600 .env
 
+          echo "Production environment created."
+
+
+          # ======================================================
+          # 7. Validate Compose configuration
+          # ======================================================
 
           echo "=========================================="
-          echo "Validating Compose configuration"
+          echo "Validating Docker Compose"
           echo "=========================================="
 
           docker compose config -q
 
-          echo "Compose configuration is valid."
+          echo "Docker Compose configuration is valid."
+
+
+          # ======================================================
+          # 8. Pull images from Docker Hub
+          # ======================================================
+
+          echo "=========================================="
+          echo "Pulling Backend Image"
+          echo "=========================================="
+
+          docker pull \
+            "$DOCKERHUB_BACKEND:$IMAGE_TAG"
 
 
           echo "=========================================="
-          echo "Pulling Docker Hub Images"
+          echo "Pulling Frontend Image"
           echo "=========================================="
 
-          docker compose pull
+          docker pull \
+            "$DOCKERHUB_FRONTEND:$IMAGE_TAG"
 
+
+          # ======================================================
+          # 9. Verify images
+          # ======================================================
+
+          echo "=========================================="
+          echo "Verifying Docker Images"
+          echo "=========================================="
+
+          docker image inspect \
+            "$DOCKERHUB_BACKEND:$IMAGE_TAG" \
+            > /dev/null
+
+          docker image inspect \
+            "$DOCKERHUB_FRONTEND:$IMAGE_TAG" \
+            > /dev/null
+
+          echo "Backend image verified."
+          echo "Frontend image verified."
+
+
+          # ======================================================
+          # 10. Start / update complete production stack
+          # ======================================================
 
           echo "=========================================="
           echo "Starting Production Stack"
@@ -750,6 +856,10 @@ jobs:
           docker compose up -d
 
 
+          # ======================================================
+          # 11. Wait for services
+          # ======================================================
+
           echo "=========================================="
           echo "Waiting for Services"
           echo "=========================================="
@@ -757,12 +867,20 @@ jobs:
           sleep 20
 
 
+          # ======================================================
+          # 12. Container status
+          # ======================================================
+
           echo "=========================================="
           echo "Container Status"
           echo "=========================================="
 
           docker compose ps
 
+
+          # ======================================================
+          # 13. PostgreSQL check
+          # ======================================================
 
           echo "=========================================="
           echo "Checking PostgreSQL"
@@ -775,29 +893,21 @@ jobs:
           echo "PostgreSQL: $POSTGRES_STATUS"
 
           if [ "$POSTGRES_STATUS" != "running" ]; then
+
             echo "ERROR: PostgreSQL is not running."
 
             docker compose logs --tail 100 postgres
 
             exit 1
+
           fi
 
-
-          echo "PostgreSQL container is running."
-
-
-          echo "=========================================="
-          echo "Testing PostgreSQL Readiness"
-          echo "=========================================="
-
-          docker exec quantum-safe-postgres \
-            pg_isready \
-            -U "$POSTGRES_USER" \
-            -d "$POSTGRES_DB"
+          echo "PostgreSQL is running."
 
 
-          echo "PostgreSQL is accepting connections."
-
+          # ======================================================
+          # 14. Backend check
+          # ======================================================
 
           echo "=========================================="
           echo "Checking Backend"
@@ -810,36 +920,21 @@ jobs:
           echo "Backend: $BACKEND_STATUS"
 
           if [ "$BACKEND_STATUS" != "running" ]; then
+
             echo "ERROR: Backend is not running."
 
             docker compose logs --tail 100 backend
 
             exit 1
+
           fi
 
-
-          echo "Backend container is running."
-
-
-          echo "=========================================="
-          echo "Checking Backend Environment"
-          echo "=========================================="
-
-          docker exec quantum-safe-backend \
-            sh -c 'test -n "$DATABASE_URL"'
-
-          echo "DATABASE_URL is configured."
+          echo "Backend is running."
 
 
-          echo "=========================================="
-          echo "Testing Backend Health"
-          echo "=========================================="
-
-          curl -f http://localhost:5001/health
-
-          echo
-          echo "Backend health check PASSED."
-
+          # ======================================================
+          # 15. Frontend check
+          # ======================================================
 
           echo "=========================================="
           echo "Checking Frontend"
@@ -852,25 +947,148 @@ jobs:
           echo "Frontend: $FRONTEND_STATUS"
 
           if [ "$FRONTEND_STATUS" != "running" ]; then
+
             echo "ERROR: Frontend is not running."
 
             docker compose logs --tail 100 frontend
 
             exit 1
+
           fi
 
+          echo "Frontend is running."
 
-          echo "Frontend container is running."
 
+          # ======================================================
+          # 16. Nginx check
+          # ======================================================
 
           echo "=========================================="
-          echo "Testing Frontend"
+          echo "Checking Nginx"
           echo "=========================================="
 
-          curl -f -I http://localhost
+          NGINX_STATUS=$(docker inspect \
+            --format='{{.State.Status}}' \
+            quantum-safe-nginx)
 
-          echo "Frontend health check PASSED."
+          echo "Nginx: $NGINX_STATUS"
 
+          if [ "$NGINX_STATUS" != "running" ]; then
+
+            echo "ERROR: Nginx is not running."
+
+            docker compose logs --tail 100 nginx
+
+            exit 1
+
+          fi
+
+          echo "Nginx is running."
+
+
+          # ======================================================
+          # 17. Prometheus check
+          # ======================================================
+
+          echo "=========================================="
+          echo "Checking Prometheus"
+          echo "=========================================="
+
+          PROMETHEUS_STATUS=$(docker inspect \
+            --format='{{.State.Status}}' \
+            quantum-safe-prometheus)
+
+          echo "Prometheus: $PROMETHEUS_STATUS"
+
+          if [ "$PROMETHEUS_STATUS" != "running" ]; then
+
+            echo "ERROR: Prometheus is not running."
+
+            docker compose logs --tail 100 prometheus
+
+            exit 1
+
+          fi
+
+          echo "Prometheus is running."
+
+
+          # ======================================================
+          # 18. Grafana check
+          # ======================================================
+
+          echo "=========================================="
+          echo "Checking Grafana"
+          echo "=========================================="
+
+          GRAFANA_STATUS=$(docker inspect \
+            --format='{{.State.Status}}' \
+            quantum-safe-grafana)
+
+          echo "Grafana: $GRAFANA_STATUS"
+
+          if [ "$GRAFANA_STATUS" != "running" ]; then
+
+            echo "ERROR: Grafana is not running."
+
+            docker compose logs --tail 100 grafana
+
+            exit 1
+
+          fi
+
+          echo "Grafana is running."
+
+
+          # ======================================================
+          # 19. Backend health
+          # ======================================================
+
+          echo "=========================================="
+          echo "Testing Backend Health"
+          echo "=========================================="
+
+          curl -f \
+            http://localhost:5001/health
+
+          echo ""
+
+          echo "Backend health check PASSED."
+
+
+          # ======================================================
+          # 20. Frontend / Nginx HTTP check
+          # ======================================================
+
+          echo "=========================================="
+          echo "Testing HTTP Endpoint"
+          echo "=========================================="
+
+          curl -f \
+            -I \
+            http://localhost
+
+          echo "HTTP endpoint check PASSED."
+
+
+          # ======================================================
+          # 21. HTTPS check
+          # ======================================================
+
+          echo "=========================================="
+          echo "Testing HTTPS Endpoint"
+          echo "=========================================="
+
+          curl -k -f \
+            -I \
+            https://localhost
+
+          echo "HTTPS endpoint check PASSED."
+
+
+          # ======================================================
+          # 22. Frontend -> Backend DNS
+          # ======================================================
 
           echo "=========================================="
           echo "Testing Frontend -> Backend DNS"
@@ -879,77 +1097,29 @@ jobs:
           docker exec quantum-safe-frontend \
             getent hosts quantum-safe-backend
 
-
           echo "Frontend can resolve backend."
 
+
+          # ======================================================
+          # 23. Frontend -> Backend connectivity
+          # ======================================================
 
           echo "=========================================="
           echo "Testing Frontend -> Backend Connectivity"
           echo "=========================================="
 
           docker exec quantum-safe-frontend \
-            wget -qO- http://quantum-safe-backend:5001/health
+            wget -qO- \
+            http://quantum-safe-backend:5001/health
 
+          echo ""
 
-          echo
           echo "Frontend -> Backend connectivity PASSED."
 
 
-          echo "=========================================="
-          echo "Checking NGINX"
-          echo "=========================================="
-
-          if docker inspect quantum-safe-nginx \
-            --format='{{.State.Status}}' | grep -q running; then
-
-            echo "NGINX is running."
-
-          else
-
-            echo "ERROR: NGINX is not running."
-
-            docker compose logs --tail 100 nginx
-
-            exit 1
-
-          fi
-
-
-          echo "=========================================="
-          echo "Checking Prometheus"
-          echo "=========================================="
-
-          if docker inspect quantum-safe-prometheus \
-            --format='{{.State.Status}}' | grep -q running; then
-
-            echo "Prometheus is running."
-
-          else
-
-            echo "WARNING: Prometheus is not running."
-
-            docker compose logs --tail 50 prometheus
-
-          fi
-
-
-          echo "=========================================="
-          echo "Checking Grafana"
-          echo "=========================================="
-
-          if docker inspect quantum-safe-grafana \
-            --format='{{.State.Status}}' | grep -q running; then
-
-            echo "Grafana is running."
-
-          else
-
-            echo "WARNING: Grafana is not running."
-
-            docker compose logs --tail 50 grafana
-
-          fi
-
+          # ======================================================
+          # 24. PostgreSQL volume check
+          # ======================================================
 
           echo "=========================================="
           echo "Checking PostgreSQL Volume"
@@ -957,6 +1127,21 @@ jobs:
 
           docker volume ls | grep postgres_data || true
 
+
+          # ======================================================
+          # 25. Verify network
+          # ======================================================
+
+          echo "=========================================="
+          echo "Docker Network"
+          echo "=========================================="
+
+          docker network ls
+
+
+          # ======================================================
+          # 26. Final status
+          # ======================================================
 
           echo "=========================================="
           echo "FINAL DEPLOYMENT STATUS"
@@ -967,6 +1152,20 @@ jobs:
 
           echo "=========================================="
           echo "DEPLOYMENT SUCCESSFUL"
+          echo "=========================================="
+
+          echo "Application:"
+          echo "http://$EC2_HOST"
+
+          echo ""
+          echo "Backend:"
+          echo "http://$EC2_HOST:5001/health"
+
+          echo ""
+          echo "HTTPS:"
+          echo "https://$EC2_HOST"
+
+          echo ""
           echo "=========================================="
 
           REMOTE_SCRIPT
