@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const api = axios.create({
-    baseURL: import.meta.env.VITE_API_URL,
+    baseURL: import.meta.env.VITE_API_URL || "/api/v1",
     headers: {
         "Content-Type": "application/json",
     },
@@ -46,7 +46,7 @@ api.interceptors.response.use(
                 const response =
                     await axios.post(
 
-                        `${import.meta.env.VITE_API_URL}/auth/refresh`,
+                        `${import.meta.env.VITE_API_URL || "/api/v1"}/auth/refresh`,
 
                         {},
 
