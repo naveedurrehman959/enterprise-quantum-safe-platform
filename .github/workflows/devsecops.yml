@@ -750,7 +750,6 @@ jobs:
           echo "=========================================="
           echo "Deployment configuration uploaded."
           echo "=========================================="
-
       # --------------------------------------------------------
       # Deploy Application
       # --------------------------------------------------------
@@ -782,11 +781,8 @@ jobs:
           echo "Quantum-Safe Platform Deployment"
           echo "=========================================="
 
-          echo "Deploying image tag:"
+          echo "Image tag:"
           echo "$IMAGE_TAG"
-
-          echo "Target:"
-          echo "$EC2_USERNAME@$EC2_HOST"
 
           ssh \
             -i "$HOME/.ssh/deploy_key" \
@@ -807,41 +803,31 @@ jobs:
 
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Checking Docker"
-          echo "=========================================="
-
-          docker --version
-          docker compose version
-
-          echo "=========================================="
-          echo "Preparing deployment directory"
-          echo "=========================================="
-
-          mkdir -p ~/enterprise-quantum-safe-platform
+          # ======================================================
+          # Deployment directory
+          # ======================================================
 
           cd ~/enterprise-quantum-safe-platform
 
           echo "=========================================="
-          echo "Checking Compose Files"
+          echo "Deployment Directory"
           echo "=========================================="
 
-          if [ ! -f docker-compose.yml ]; then
-            echo "ERROR: docker-compose.yml not found."
-            exit 1
-          fi
+          pwd
 
-          if [ ! -f docker/nginx/default.conf ]; then
-            echo "ERROR: Nginx configuration not found."
-            exit 1
-          fi
 
-          if [ ! -f monitoring/prometheus/prometheus.yml ]; then
-            echo "ERROR: Prometheus configuration not found."
-            exit 1
-          fi
+          # ======================================================
+          # Validate files
+          # ======================================================
 
-          echo "All deployment files found."
+          test -f docker-compose.yml
+          test -f docker/nginx/default.conf
+          test -f monitoring/prometheus/prometheus.yml
+
+
+          # ======================================================
+          # TLS
+          # ======================================================
 
           echo "=========================================="
           echo "Preparing TLS"
@@ -858,7 +844,10 @@ jobs:
           chmod 644 docker/nginx/ssl/server.crt
           chmod 600 docker/nginx/ssl/server.key
 
-          echo "TLS files created."
+
+          # ======================================================
+          # Docker Hub Login
+          # ======================================================
 
           echo "=========================================="
           echo "Docker Hub Login"
@@ -868,8 +857,13 @@ jobs:
             --username "$DOCKERHUB_USERNAME" \
             --password-stdin
 
+
+          # ======================================================
+          # Create .env automatically
+          # ======================================================
+
           echo "=========================================="
-          echo "Creating .env"
+          echo "Creating Deployment Environment"
           echo "=========================================="
 
           cat > .env <<EOF
@@ -881,6 +875,13 @@ jobs:
 
           chmod 600 .env
 
+          echo "Environment file created."
+
+
+          # ======================================================
+          # Validate Compose
+          # ======================================================
+
           echo "=========================================="
           echo "Validating Docker Compose"
           echo "=========================================="
@@ -889,19 +890,79 @@ jobs:
 
           echo "Docker Compose configuration is valid."
 
+
+          # ======================================================
+          # Pull application images
+          # ======================================================
+
           echo "=========================================="
           echo "Pulling Backend Image"
           echo "=========================================="
 
-          docker pull \
-            "$DOCKERHUB_BACKEND:$IMAGE_TAG"
+          docker pull "$DOCKERHUB_BACKEND:$IMAGE_TAG"
+
 
           echo "=========================================="
           echo "Pulling Frontend Image"
           echo "=========================================="
 
-          docker pull \
-            "$DOCKERHUB_FRONTEND:$IMAGE_TAG"
+          docker pull "$DOCKERHUB_FRONTEND:$IMAGE_TAG"
+
+
+          # ======================================================
+          # Start PostgreSQL
+          # ======================================================
+
+          echo "=========================================="
+          echo "Starting PostgreSQL"
+          echo "=========================================="
+
+          docker compose up -d postgres
+
+
+          # ======================================================
+          # Wait for PostgreSQL
+          # ======================================================
+
+          echo "=========================================="
+          echo "Waiting for PostgreSQL"
+          echo "=========================================="
+
+          for i in {1..30}; do
+
+            if docker compose exec -T postgres \
+              pg_isready \
+              -U "$POSTGRES_USER" \
+              -d "$POSTGRES_DB"; then
+
+              echo "PostgreSQL is ready."
+              break
+
+            fi
+
+            echo "PostgreSQL not ready yet..."
+            sleep 2
+
+          done
+
+
+          # ======================================================
+          # Run Database Migrations
+          # ======================================================
+
+          echo "=========================================="
+          echo "Running Database Migrations"
+          echo "=========================================="
+
+          docker compose run --rm backend \
+            flask db upgrade
+
+          echo "Database migration completed successfully."
+
+
+          # ======================================================
+          # Start / Update Complete Stack
+          # ======================================================
 
           echo "=========================================="
           echo "Starting Production Stack"
@@ -909,9 +970,21 @@ jobs:
 
           docker compose up -d
 
-          echo "Waiting for services..."
 
-          sleep 20
+          # ======================================================
+          # Cleanup unused images
+          # ======================================================
+
+          echo "=========================================="
+          echo "Cleaning Old Docker Images"
+          echo "=========================================="
+
+          docker image prune -f
+
+
+          # ======================================================
+          # Container Status
+          # ======================================================
 
           echo "=========================================="
           echo "Container Status"
@@ -919,8 +992,24 @@ jobs:
 
           docker compose ps
 
+
+          # ======================================================
+          # Database Verification
+          # ======================================================
+
           echo "=========================================="
-          echo "Deployment Completed"
+          echo "Database Verification"
+          echo "=========================================="
+
+          docker compose exec -T postgres \
+            psql \
+            -U "$POSTGRES_USER" \
+            -d "$POSTGRES_DB" \
+            -c "SELECT current_user, current_database();"
+
+
+          echo "=========================================="
+          echo "Deployment Completed Successfully"
           echo "=========================================="
 
           REMOTE_SCRIPT

@@ -1,27 +1,5 @@
 services:
 
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: quantum-safe-prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    depends_on:
-      - backend
-    restart: unless-stopped
-
-  grafana:
-    image: grafana/grafana-oss:latest
-    container_name: quantum-safe-grafana
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-    depends_on:
-      - prometheus
-    restart: unless-stopped
-
   postgres:
     image: postgres:16
     container_name: quantum-safe-postgres
@@ -32,12 +10,15 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    networks:
+      - quantum-safe-network
+
 
   backend:
     image: naveedurehman/enterprise-quantum-safe-backend:${IMAGE_TAG}
     container_name: quantum-safe-backend
     ports:
-      - "5001"
+      - "5001:5001"
     environment:
       FLASK_ENV: production
       FLASK_APP: wsgi.py
@@ -45,15 +26,21 @@ services:
     depends_on:
       - postgres
     restart: unless-stopped
+    networks:
+      - quantum-safe-network
+
 
   frontend:
     image: naveedurehman/enterprise-quantum-safe-frontend:${IMAGE_TAG}
     container_name: quantum-safe-frontend
     ports:
-      - "80"
+      - "3001:80"
     depends_on:
       - backend
     restart: unless-stopped
+    networks:
+      - quantum-safe-network
+
 
   nginx:
     image: nginx:alpine
@@ -68,7 +55,44 @@ services:
       - frontend
       - backend
     restart: unless-stopped
+    networks:
+      - quantum-safe-network
+
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: quantum-safe-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - quantum-safe-network
+
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: quantum-safe-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - quantum-safe-network
+
 
 volumes:
   postgres_data:
   grafana_data:
+
+
+networks:
+  quantum-safe-network:
+    name: quantum-safe-network
+    driver: bridge
