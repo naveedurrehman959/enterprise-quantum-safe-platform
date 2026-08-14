@@ -784,10 +784,14 @@ jobs:
           echo "Image tag:"
           echo "$IMAGE_TAG"
 
+          echo "Target:"
+          echo "$EC2_USERNAME@$EC2_HOST"
+
           ssh \
             -i "$HOME/.ssh/deploy_key" \
             -o StrictHostKeyChecking=yes \
             -o BatchMode=yes \
+            -o ConnectTimeout=15 \
             "$EC2_USERNAME@$EC2_HOST" \
             "IMAGE_TAG='$IMAGE_TAG' \
              DOCKERHUB_BACKEND='$DOCKERHUB_BACKEND' \
@@ -804,10 +808,12 @@ jobs:
           set -euo pipefail
 
           # ======================================================
-          # Deployment directory
+          # VARIABLES
           # ======================================================
 
-          cd ~/enterprise-quantum-safe-platform
+          DEPLOY_DIR="$HOME/enterprise-quantum-safe-platform"
+
+          cd "$DEPLOY_DIR"
 
           echo "=========================================="
           echo "Deployment Directory"
@@ -817,16 +823,62 @@ jobs:
 
 
           # ======================================================
-          # Validate files
+          # VALIDATE REQUIRED FILES
           # ======================================================
 
-          test -f docker-compose.yml
-          test -f docker/nginx/default.conf
-          test -f monitoring/prometheus/prometheus.yml
+          echo "=========================================="
+          echo "Validating Deployment Files"
+          echo "=========================================="
+
+          REQUIRED_FILES=(
+            "docker-compose.yml"
+            "docker/nginx/default.conf"
+            "monitoring/prometheus/prometheus.yml"
+          )
+
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "ERROR: Required file not found: $file"
+              exit 1
+            fi
+          done
+
+          echo "All required deployment files exist."
 
 
           # ======================================================
-          # TLS
+          # VALIDATE REQUIRED ENVIRONMENT VARIABLES
+          # ======================================================
+
+          echo "=========================================="
+          echo "Validating Deployment Variables"
+          echo "=========================================="
+
+          REQUIRED_VARS=(
+            IMAGE_TAG
+            DOCKERHUB_BACKEND
+            DOCKERHUB_FRONTEND
+            DOCKERHUB_USERNAME
+            DOCKERHUB_TOKEN
+            POSTGRES_DB
+            POSTGRES_USER
+            POSTGRES_PASSWORD
+            TLS_CERT
+            TLS_PRIVATE_KEY
+          )
+
+          for var in "${REQUIRED_VARS[@]}"; do
+            if [ -z "${!var:-}" ]; then
+              echo "ERROR: Required variable is empty: $var"
+              exit 1
+            fi
+          done
+
+          echo "All required deployment variables are present."
+
+
+          # ======================================================
+          # PREPARE TLS
           # ======================================================
 
           echo "=========================================="
@@ -844,9 +896,88 @@ jobs:
           chmod 644 docker/nginx/ssl/server.crt
           chmod 600 docker/nginx/ssl/server.key
 
+          echo "TLS files created."
+
 
           # ======================================================
-          # Docker Hub Login
+          # VALIDATE TLS CERTIFICATE
+          # ======================================================
+
+          echo "=========================================="
+          echo "Validating TLS Certificate"
+          echo "=========================================="
+
+          if ! openssl x509 \
+            -in docker/nginx/ssl/server.crt \
+            -noout \
+            -subject \
+            -issuer \
+            -dates; then
+
+            echo "ERROR: TLS certificate is invalid."
+            exit 1
+          fi
+
+          echo "TLS certificate is valid."
+
+
+          # ======================================================
+          # VALIDATE TLS PRIVATE KEY
+          # ======================================================
+
+          echo "=========================================="
+          echo "Validating TLS Private Key"
+          echo "=========================================="
+
+          if ! openssl pkey \
+            -in docker/nginx/ssl/server.key \
+            -noout; then
+
+            echo "ERROR: TLS private key is invalid."
+            exit 1
+          fi
+
+          echo "TLS private key is valid."
+
+
+          # ======================================================
+          # VERIFY CERTIFICATE / KEY MATCH
+          # ======================================================
+
+          echo "=========================================="
+          echo "Checking TLS Certificate / Key Match"
+          echo "=========================================="
+
+          CERT_PUBLIC_KEY=$(
+            openssl x509 \
+              -in docker/nginx/ssl/server.crt \
+              -pubkey \
+              -noout |
+            openssl pkey -pubin -outform DER 2>/dev/null |
+            sha256sum |
+            awk '{print $1}'
+          )
+
+          KEY_PUBLIC_KEY=$(
+            openssl pkey \
+              -in docker/nginx/ssl/server.key \
+              -pubout 2>/dev/null |
+            openssl pkey -pubin -outform DER 2>/dev/null |
+            sha256sum |
+            awk '{print $1}'
+          )
+
+          if [ "$CERT_PUBLIC_KEY" != "$KEY_PUBLIC_KEY" ]; then
+            echo "ERROR: TLS certificate and private key do NOT match."
+            echo "Deployment stopped to prevent Nginx SSL failure."
+            exit 1
+          fi
+
+          echo "TLS certificate and private key match."
+
+
+          # ======================================================
+          # DOCKER HUB LOGIN
           # ======================================================
 
           echo "=========================================="
@@ -857,29 +988,33 @@ jobs:
             --username "$DOCKERHUB_USERNAME" \
             --password-stdin
 
+          echo "Docker Hub authentication successful."
+
 
           # ======================================================
-          # Create .env automatically
+          # CREATE DEPLOYMENT .ENV
           # ======================================================
 
           echo "=========================================="
           echo "Creating Deployment Environment"
           echo "=========================================="
 
+          umask 077
+
           cat > .env <<EOF
-          IMAGE_TAG=$IMAGE_TAG
-          POSTGRES_DB=$POSTGRES_DB
-          POSTGRES_USER=$POSTGRES_USER
-          POSTGRES_PASSWORD=$POSTGRES_PASSWORD
-          EOF
+IMAGE_TAG=$IMAGE_TAG
+POSTGRES_DB=$POSTGRES_DB
+POSTGRES_USER=$POSTGRES_USER
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+EOF
 
           chmod 600 .env
 
-          echo "Environment file created."
+          echo "Deployment .env created."
 
 
           # ======================================================
-          # Validate Compose
+          # VALIDATE DOCKER COMPOSE
           # ======================================================
 
           echo "=========================================="
@@ -892,25 +1027,31 @@ jobs:
 
 
           # ======================================================
-          # Pull application images
+          # PULL NEW APPLICATION IMAGES
           # ======================================================
 
           echo "=========================================="
           echo "Pulling Backend Image"
           echo "=========================================="
 
-          docker pull "$DOCKERHUB_BACKEND:$IMAGE_TAG"
+          docker pull \
+            "$DOCKERHUB_BACKEND:$IMAGE_TAG"
 
 
           echo "=========================================="
           echo "Pulling Frontend Image"
           echo "=========================================="
 
-          docker pull "$DOCKERHUB_FRONTEND:$IMAGE_TAG"
+          docker pull \
+            "$DOCKERHUB_FRONTEND:$IMAGE_TAG"
 
 
           # ======================================================
-          # Start PostgreSQL
+          # START POSTGRESQL
+          #
+          # IMPORTANT:
+          # Do NOT remove postgres_data.
+          # Existing database data is preserved.
           # ======================================================
 
           echo "=========================================="
@@ -921,69 +1062,112 @@ jobs:
 
 
           # ======================================================
-          # Wait for PostgreSQL
+          # WAIT FOR POSTGRESQL
           # ======================================================
 
           echo "=========================================="
           echo "Waiting for PostgreSQL"
           echo "=========================================="
 
+          POSTGRES_READY=false
+
           for i in {1..30}; do
 
             if docker compose exec -T postgres \
               pg_isready \
               -U "$POSTGRES_USER" \
-              -d "$POSTGRES_DB"; then
+              -d "$POSTGRES_DB" \
+              >/dev/null 2>&1; then
 
               echo "PostgreSQL is ready."
+              POSTGRES_READY=true
               break
 
             fi
 
-            echo "PostgreSQL not ready yet..."
+            echo "PostgreSQL not ready yet... attempt $i/30"
+
             sleep 2
 
           done
 
+          if [ "$POSTGRES_READY" != "true" ]; then
+
+            echo "ERROR: PostgreSQL did not become ready."
+
+            echo "PostgreSQL logs:"
+            docker compose logs postgres --tail=100 || true
+
+            exit 1
+
+          fi
+
 
           # ======================================================
-          # Run Database Migrations
+          # VERIFY DATABASE CONNECTION
+          # ======================================================
+
+          echo "=========================================="
+          echo "Verifying Database Connection"
+          echo "=========================================="
+
+          docker compose exec -T postgres \
+            psql \
+            -U "$POSTGRES_USER" \
+            -d "$POSTGRES_DB" \
+            -c "SELECT current_user, current_database();"
+
+          echo "Database connection successful."
+
+
+          # ======================================================
+          # DATABASE MIGRATIONS
+          #
+          # flask db upgrade is SAFE to run repeatedly.
+          # Already-applied migrations are skipped.
+          # New migrations are applied automatically.
           # ======================================================
 
           echo "=========================================="
           echo "Running Database Migrations"
           echo "=========================================="
 
-          docker compose run --rm backend \
+          docker compose run \
+            --rm \
+            --no-deps \
+            backend \
             flask db upgrade
 
           echo "Database migration completed successfully."
 
 
           # ======================================================
-          # Start / Update Complete Stack
+          # START / UPDATE APPLICATION STACK
           # ======================================================
 
           echo "=========================================="
           echo "Starting Production Stack"
           echo "=========================================="
 
-          docker compose up -d
+          docker compose up -d \
+            --remove-orphans
+
+          echo "Production stack started."
 
 
           # ======================================================
-          # Cleanup unused images
+          # WAIT FOR CONTAINERS
           # ======================================================
 
           echo "=========================================="
-          echo "Cleaning Old Docker Images"
+          echo "Waiting for Application Containers"
           echo "=========================================="
 
-          docker image prune -f
+          sleep 10
 
 
           # ======================================================
-          # Container Status
+          # CONTAINER STATUS
           # ======================================================
 
           echo "=========================================="
@@ -994,7 +1178,82 @@ jobs:
 
 
           # ======================================================
-          # Database Verification
+          # VERIFY REQUIRED CONTAINERS
+          # ======================================================
+
+          echo "=========================================="
+          echo "Verifying Required Containers"
+          echo "=========================================="
+
+          REQUIRED_SERVICES=(
+            postgres
+            backend
+            frontend
+            nginx
+            prometheus
+            grafana
+          )
+
+          for service in "${REQUIRED_SERVICES[@]}"; do
+
+            CONTAINER_ID=$(
+              docker compose ps \
+                -q "$service" 2>/dev/null || true
+            )
+
+            if [ -z "$CONTAINER_ID" ]; then
+              echo "ERROR: Service has no container: $service"
+              docker compose ps
+              exit 1
+            fi
+
+            STATUS=$(
+              docker inspect \
+                --format '{{.State.Status}}' \
+                "$CONTAINER_ID"
+            )
+
+            if [ "$STATUS" != "running" ]; then
+
+              echo "ERROR: Service is not running: $service"
+              echo "Status: $STATUS"
+
+              docker compose logs \
+                --tail=100 \
+                "$service" || true
+
+              exit 1
+
+            fi
+
+            echo "$service: running"
+
+          done
+
+
+          # ======================================================
+          # NGINX CONFIGURATION TEST
+          # ======================================================
+
+          echo "=========================================="
+          echo "Testing Nginx Configuration"
+          echo "=========================================="
+
+          if ! docker compose exec -T nginx nginx -t; then
+
+            echo "ERROR: Nginx configuration test failed."
+
+            docker compose logs nginx --tail=100 || true
+
+            exit 1
+
+          fi
+
+          echo "Nginx configuration is valid."
+
+
+          # ======================================================
+          # DATABASE VERIFICATION
           # ======================================================
 
           echo "=========================================="
@@ -1008,8 +1267,86 @@ jobs:
             -c "SELECT current_user, current_database();"
 
 
+          # ======================================================
+          # MIGRATION VERSION
+          # ======================================================
+
           echo "=========================================="
-          echo "Deployment Completed Successfully"
+          echo "Migration Verification"
+          echo "=========================================="
+
+          docker compose exec -T postgres \
+            psql \
+            -U "$POSTGRES_USER" \
+            -d "$POSTGRES_DB" \
+            -c "SELECT version_num FROM alembic_version;" \
+            || echo "WARNING: alembic_version table not available."
+
+
+          # ======================================================
+          # APPLICATION HEALTH CHECK
+          # ======================================================
+
+          echo "=========================================="
+          echo "Application Health Check"
+          echo "=========================================="
+
+          BACKEND_HEALTHY=false
+
+          for i in {1..15}; do
+
+            if curl \
+              --silent \
+              --fail \
+              --max-time 5 \
+              http://127.0.0.1:5001/health \
+              >/dev/null 2>&1; then
+
+              echo "Backend health check successful."
+              BACKEND_HEALTHY=true
+              break
+
+            fi
+
+            echo "Backend not ready yet... attempt $i/15"
+            sleep 2
+
+          done
+
+          if [ "$BACKEND_HEALTHY" != "true" ]; then
+
+            echo "WARNING: /health endpoint was not reachable."
+
+            echo "Backend logs:"
+            docker compose logs backend --tail=100 || true
+
+          fi
+
+
+          # ======================================================
+          # FINAL STATUS
+          # ======================================================
+
+          echo "=========================================="
+          echo "Final Container Status"
+          echo "=========================================="
+
+          docker compose ps
+
+
+          # ======================================================
+          # CLEAN OLD UNUSED IMAGES
+          # ======================================================
+
+          echo "=========================================="
+          echo "Cleaning Unused Docker Images"
+          echo "=========================================="
+
+          docker image prune -f
+
+
+          echo "=========================================="
+          echo "DEPLOYMENT COMPLETED SUCCESSFULLY"
           echo "=========================================="
 
           REMOTE_SCRIPT
