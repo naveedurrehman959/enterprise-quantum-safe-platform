@@ -1,4 +1,3 @@
-
 name: Enterprise Quantum-Safe DevSecOps
 
 on:
@@ -25,6 +24,15 @@ env:
 
   BACKEND_IMAGE: enterprise-quantum-safe-backend
   FRONTEND_IMAGE: enterprise-quantum-safe-frontend
+
+
+# ============================================================
+# CONCURRENCY
+# ============================================================
+
+concurrency:
+  group: enterprise-quantum-safe-${{ github.ref }}
+  cancel-in-progress: true
 
 
 jobs:
@@ -301,8 +309,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Trivy Configuration Scan
-        uses: aquasecurity/trivy-action@v0.36.0
-        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           scan-type: config
           scan-ref: .
@@ -362,8 +369,6 @@ jobs:
 
   # ============================================================
   # 12. CONTAINER SECURITY SCANNING
-  #
-  # TRIVY POLICY: WARNING ONLY
   # ============================================================
 
   container-scan:
@@ -384,8 +389,7 @@ jobs:
           docker load -i docker-images.tar
 
       - name: Scan Backend Image
-        uses: aquasecurity/trivy-action@v0.36.0
-        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: enterprise-quantum-safe-backend:${{ github.sha }}
           scanners: vuln
@@ -396,8 +400,7 @@ jobs:
           format: table
 
       - name: Scan Frontend Image
-        uses: aquasecurity/trivy-action@v0.36.0
-        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: enterprise-quantum-safe-frontend:${{ github.sha }}
           scanners: vuln
@@ -419,11 +422,15 @@ jobs:
     needs:
       - container-scan
 
+    # Only publish images from actual branch pushes.
+    if: github.event_name == 'push'
+
     permissions:
       contents: read
       packages: write
 
     steps:
+
       - name: Download Docker Images
         uses: actions/download-artifact@v4
         with:
@@ -458,16 +465,6 @@ jobs:
 
 
       # --------------------------------------------------------
-      # VERIFY DOCKER HUB LOGIN
-      # --------------------------------------------------------
-
-      - name: Verify Docker Hub Login
-        run: |
-          echo "Docker Hub authentication completed."
-          echo "Docker Hub username: ${{ secrets.DOCKERHUB_USERNAME }}"
-
-
-      # --------------------------------------------------------
       # TAG IMAGES
       # --------------------------------------------------------
 
@@ -491,18 +488,13 @@ jobs:
 
 
       # --------------------------------------------------------
-      # PUSH BACKEND TO GHCR
+      # PUSH TO GHCR
       # --------------------------------------------------------
 
       - name: Push Backend to GHCR
         run: |
           docker push \
             ${{ env.GHCR_IMAGE_PREFIX }}-backend:${{ github.sha }}
-
-
-      # --------------------------------------------------------
-      # PUSH FRONTEND TO GHCR
-      # --------------------------------------------------------
 
       - name: Push Frontend to GHCR
         run: |
@@ -511,7 +503,7 @@ jobs:
 
 
       # --------------------------------------------------------
-      # PUSH BACKEND TO DOCKER HUB
+      # PUSH TO DOCKER HUB
       # --------------------------------------------------------
 
       - name: Push Backend to Docker Hub
@@ -519,15 +511,12 @@ jobs:
           docker push \
             ${{ env.DOCKERHUB_IMAGE_PREFIX }}-backend:${{ github.sha }}
 
-
-      # --------------------------------------------------------
-      # PUSH FRONTEND TO DOCKER HUB
-      # --------------------------------------------------------
-
       - name: Push Frontend to Docker Hub
         run: |
           docker push \
             ${{ env.DOCKERHUB_IMAGE_PREFIX }}-frontend:${{ github.sha }}
+
+
   # ============================================================
   # 14. DEPLOY TO AWS EC2
   # ============================================================
@@ -546,16 +535,17 @@ jobs:
 
     steps:
 
-      # --------------------------------------------------------
-      # Checkout repository
-      # --------------------------------------------------------
+      # ========================================================
+      # CHECKOUT
+      # ========================================================
 
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # --------------------------------------------------------
-      # Validate EC2 secrets
-      # --------------------------------------------------------
+
+      # ========================================================
+      # VALIDATE EC2 SECRETS
+      # ========================================================
 
       - name: Validate EC2 Configuration
         env:
@@ -565,26 +555,27 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -z "$EC2_HOST" ]; then
-            echo "ERROR: EC2_HOST secret is not configured."
+          test -n "$EC2_HOST" || {
+            echo "ERROR: EC2_HOST is not configured."
             exit 1
-          fi
+          }
 
-          if [ -z "$EC2_USERNAME" ]; then
-            echo "ERROR: EC2_USERNAME secret is not configured."
+          test -n "$EC2_USERNAME" || {
+            echo "ERROR: EC2_USERNAME is not configured."
             exit 1
-          fi
+          }
 
-          if [ -z "$EC2_SSH_KEY" ]; then
-            echo "ERROR: EC2_SSH_KEY secret is not configured."
+          test -n "$EC2_SSH_KEY" || {
+            echo "ERROR: EC2_SSH_KEY is not configured."
             exit 1
-          fi
+          }
 
           echo "EC2 configuration detected."
 
-      # --------------------------------------------------------
-      # Configure SSH
-      # --------------------------------------------------------
+
+      # ========================================================
+      # CONFIGURE SSH
+      # ========================================================
 
       - name: Configure SSH
         env:
@@ -594,79 +585,31 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "========================================="
-          echo "Configuring SSH"
-          echo "========================================="
-
           mkdir -p "$HOME/.ssh"
           chmod 700 "$HOME/.ssh"
 
-          printf '%s\n' "$EC2_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$EC2_SSH_KEY" \
+            > "$HOME/.ssh/deploy_key"
+
           chmod 600 "$HOME/.ssh/deploy_key"
 
-          echo "Checking SSH private key..."
-
-          if ! ssh-keygen -y \
+          ssh-keygen -y \
             -f "$HOME/.ssh/deploy_key" \
-            > /dev/null 2>&1; then
+            > /dev/null
 
-            echo "ERROR: EC2_SSH_KEY is not a valid private SSH key."
-            exit 1
-          fi
-
-          echo "SSH private key format is valid."
-
-          echo "========================================="
-          echo "EC2 Connectivity Diagnostics"
-          echo "========================================="
-
-          echo "Testing DNS resolution..."
-
-          if getent hosts "$EC2_HOST"; then
-            echo "DNS resolution successful."
-          else
-            echo "WARNING: DNS resolution failed."
-          fi
-
-          echo ""
-          echo "Testing TCP port 22..."
-
-          if timeout 10 bash -c "</dev/tcp/$EC2_HOST/22" 2>/dev/null; then
-            echo "TCP port 22 is reachable."
-          else
-            echo "ERROR: TCP port 22 is NOT reachable."
-            exit 1
-          fi
-
-          echo ""
-          echo "Scanning SSH host key..."
+          timeout 10 bash -c \
+            "</dev/tcp/$EC2_HOST/22"
 
           rm -f "$HOME/.ssh/known_hosts"
 
-          if ! ssh-keyscan \
+          ssh-keyscan \
             -T 15 \
             -p 22 \
             -H \
             "$EC2_HOST" \
-            > "$HOME/.ssh/known_hosts" \
-            2>/tmp/ssh-keyscan-error.log; then
-
-            echo "ERROR: ssh-keyscan failed."
-            cat /tmp/ssh-keyscan-error.log || true
-            exit 1
-          fi
-
-          if [ ! -s "$HOME/.ssh/known_hosts" ]; then
-            echo "ERROR: No SSH host key was returned."
-            exit 1
-          fi
+            > "$HOME/.ssh/known_hosts"
 
           chmod 644 "$HOME/.ssh/known_hosts"
-
-          echo "SSH host key successfully obtained."
-
-          echo ""
-          echo "Testing SSH authentication..."
 
           ssh \
             -i "$HOME/.ssh/deploy_key" \
@@ -676,11 +619,10 @@ jobs:
             "$EC2_USERNAME@$EC2_HOST" \
             "echo 'SSH authentication successful.'"
 
-          echo "SSH configuration completed successfully."
 
-      # --------------------------------------------------------
-      # Upload deployment configuration
-      # --------------------------------------------------------
+      # ========================================================
+      # UPLOAD DEPLOYMENT CONFIGURATION
+      # ========================================================
 
       - name: Upload Deployment Configuration
         env:
@@ -689,30 +631,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Uploading Deployment Configuration"
-          echo "=========================================="
-
-          echo "Checking required local files..."
-
-          if [ ! -f docker-compose.yml ]; then
-            echo "ERROR: docker-compose.yml does not exist in repository."
-            exit 1
-          fi
-
-          if [ ! -f docker/nginx/default.conf ]; then
-            echo "ERROR: docker/nginx/default.conf does not exist."
-            exit 1
-          fi
-
-          if [ ! -f monitoring/prometheus/prometheus.yml ]; then
-            echo "ERROR: monitoring/prometheus/prometheus.yml does not exist."
-            exit 1
-          fi
-
-          echo "All required deployment files found."
-
-          echo "Creating directories on EC2..."
+          test -f docker-compose.yml
+          test -f docker/nginx/default.conf
+          test -f monitoring/prometheus/prometheus.yml
 
           ssh \
             -i "$HOME/.ssh/deploy_key" \
@@ -723,15 +644,11 @@ jobs:
               ~/enterprise-quantum-safe-platform/docker/nginx \
               ~/enterprise-quantum-safe-platform/monitoring/prometheus"
 
-          echo "Uploading docker-compose.yml..."
-
           scp \
             -i "$HOME/.ssh/deploy_key" \
             -o StrictHostKeyChecking=yes \
             docker-compose.yml \
             "$EC2_USERNAME@$EC2_HOST:~/enterprise-quantum-safe-platform/docker-compose.yml"
-
-          echo "Uploading Nginx configuration..."
 
           scp \
             -i "$HOME/.ssh/deploy_key" \
@@ -739,20 +656,18 @@ jobs:
             docker/nginx/default.conf \
             "$EC2_USERNAME@$EC2_HOST:~/enterprise-quantum-safe-platform/docker/nginx/default.conf"
 
-          echo "Uploading Prometheus configuration..."
-
           scp \
             -i "$HOME/.ssh/deploy_key" \
             -o StrictHostKeyChecking=yes \
             monitoring/prometheus/prometheus.yml \
             "$EC2_USERNAME@$EC2_HOST:~/enterprise-quantum-safe-platform/monitoring/prometheus/prometheus.yml"
 
-          echo "=========================================="
           echo "Deployment configuration uploaded."
-          echo "=========================================="
-      # --------------------------------------------------------
-      # Deploy Application
-      # --------------------------------------------------------
+
+
+      # ========================================================
+      # DEPLOY APPLICATION
+      # ========================================================
 
       - name: Deploy Application
         env:
@@ -777,15 +692,31 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Quantum-Safe Platform Deployment"
-          echo "=========================================="
+          # ------------------------------------------------------
+          # Encode secrets before sending them to EC2.
+          # This avoids shell parsing problems with passwords,
+          # certificates and special characters.
+          # ------------------------------------------------------
 
-          echo "Image tag:"
-          echo "$IMAGE_TAG"
+          DOCKERHUB_TOKEN_B64="$(
+            printf '%s' "$DOCKERHUB_TOKEN" |
+            base64 -w 0
+          )"
 
-          echo "Target:"
-          echo "$EC2_USERNAME@$EC2_HOST"
+          POSTGRES_PASSWORD_B64="$(
+            printf '%s' "$POSTGRES_PASSWORD" |
+            base64 -w 0
+          )"
+
+          TLS_CERT_B64="$(
+            printf '%s' "$TLS_CERT" |
+            base64 -w 0
+          )"
+
+          TLS_PRIVATE_KEY_B64="$(
+            printf '%s' "$TLS_PRIVATE_KEY" |
+            base64 -w 0
+          )"
 
           ssh \
             -i "$HOME/.ssh/deploy_key" \
@@ -797,38 +728,24 @@ jobs:
              DOCKERHUB_BACKEND='$DOCKERHUB_BACKEND' \
              DOCKERHUB_FRONTEND='$DOCKERHUB_FRONTEND' \
              DOCKERHUB_USERNAME='$DOCKERHUB_USERNAME' \
-             DOCKERHUB_TOKEN='$DOCKERHUB_TOKEN' \
+             DOCKERHUB_TOKEN_B64='$DOCKERHUB_TOKEN_B64' \
              POSTGRES_DB='$POSTGRES_DB' \
              POSTGRES_USER='$POSTGRES_USER' \
-             POSTGRES_PASSWORD='$POSTGRES_PASSWORD' \
-             TLS_CERT='$TLS_CERT' \
-             TLS_PRIVATE_KEY='$TLS_PRIVATE_KEY' \
+             POSTGRES_PASSWORD_B64='$POSTGRES_PASSWORD_B64' \
+             TLS_CERT_B64='$TLS_CERT_B64' \
+             TLS_PRIVATE_KEY_B64='$TLS_PRIVATE_KEY_B64' \
              bash -s" <<'REMOTE_SCRIPT'
 
           set -euo pipefail
-
-          # ======================================================
-          # VARIABLES
-          # ======================================================
 
           DEPLOY_DIR="$HOME/enterprise-quantum-safe-platform"
 
           cd "$DEPLOY_DIR"
 
-          echo "=========================================="
-          echo "Deployment Directory"
-          echo "=========================================="
-
-          pwd
-
 
           # ======================================================
-          # VALIDATE REQUIRED FILES
+          # VALIDATE FILES
           # ======================================================
-
-          echo "=========================================="
-          echo "Validating Deployment Files"
-          echo "=========================================="
 
           REQUIRED_FILES=(
             "docker-compose.yml"
@@ -838,122 +755,94 @@ jobs:
 
           for file in "${REQUIRED_FILES[@]}"; do
             if [ ! -f "$file" ]; then
-              echo "ERROR: Required file not found: $file"
+              echo "ERROR: Missing file: $file"
               exit 1
             fi
           done
 
-          echo "All required deployment files exist."
+
+          # ======================================================
+          # DECODE SECRETS
+          # ======================================================
+
+          DOCKERHUB_TOKEN="$(
+            printf '%s' "$DOCKERHUB_TOKEN_B64" |
+            base64 -d
+          )"
+
+          POSTGRES_PASSWORD="$(
+            printf '%s' "$POSTGRES_PASSWORD_B64" |
+            base64 -d
+          )"
+
+          TLS_CERT="$(
+            printf '%s' "$TLS_CERT_B64" |
+            base64 -d
+          )"
+
+          TLS_PRIVATE_KEY="$(
+            printf '%s' "$TLS_PRIVATE_KEY_B64" |
+            base64 -d
+          )"
 
 
           # ======================================================
-          # VALIDATE REQUIRED ENVIRONMENT VARIABLES
+          # TLS
           # ======================================================
 
-          echo "=========================================="
-          echo "Validating Deployment Variables"
-          echo "=========================================="
-
-          REQUIRED_VARS=(
-            IMAGE_TAG
-            DOCKERHUB_BACKEND
-            DOCKERHUB_FRONTEND
-            DOCKERHUB_USERNAME
-            DOCKERHUB_TOKEN
-            POSTGRES_DB
-            POSTGRES_USER
-            POSTGRES_PASSWORD
-            TLS_CERT
-            TLS_PRIVATE_KEY
-          )
-
-          for var in "${REQUIRED_VARS[@]}"; do
-            if [ -z "${!var:-}" ]; then
-              echo "ERROR: Required variable is empty: $var"
-              exit 1
-            fi
-          done
-
-          echo "All required deployment variables are present."
-
-
-          # ======================================================
-          # PREPARE TLS
-          # ======================================================
-
-          echo "=========================================="
-          echo "Preparing TLS"
-          echo "=========================================="
+          echo "Preparing TLS..."
 
           mkdir -p docker/nginx/ssl
 
-          printf '%s\n' "$TLS_CERT" \
+          printf '%s' "$TLS_CERT" \
             > docker/nginx/ssl/server.crt
 
-          printf '%s\n' "$TLS_PRIVATE_KEY" \
+          printf '%s' "$TLS_PRIVATE_KEY" \
             > docker/nginx/ssl/server.key
 
           chmod 644 docker/nginx/ssl/server.crt
           chmod 600 docker/nginx/ssl/server.key
 
-          echo "TLS files created."
-
 
           # ======================================================
-          # VALIDATE TLS CERTIFICATE
+          # TLS CERTIFICATE VALIDATION
           # ======================================================
 
-          echo "=========================================="
-          echo "Validating TLS Certificate"
-          echo "=========================================="
+          echo "Validating TLS certificate..."
 
-          if ! openssl x509 \
+          openssl x509 \
             -in docker/nginx/ssl/server.crt \
             -noout \
             -subject \
             -issuer \
-            -dates; then
-
-            echo "ERROR: TLS certificate is invalid."
-            exit 1
-          fi
-
-          echo "TLS certificate is valid."
+            -dates
 
 
           # ======================================================
-          # VALIDATE TLS PRIVATE KEY
+          # TLS PRIVATE KEY VALIDATION
           # ======================================================
 
-          echo "=========================================="
-          echo "Validating TLS Private Key"
-          echo "=========================================="
+          echo "Validating TLS private key..."
 
-          if ! openssl pkey \
+          openssl pkey \
             -in docker/nginx/ssl/server.key \
-            -noout; then
-
-            echo "ERROR: TLS private key is invalid."
-            exit 1
-          fi
-
-          echo "TLS private key is valid."
+            -noout
 
 
           # ======================================================
-          # VERIFY CERTIFICATE / KEY MATCH
+          # TLS CERTIFICATE / KEY MATCH
           # ======================================================
 
-          echo "=========================================="
-          echo "Checking TLS Certificate / Key Match"
-          echo "=========================================="
+          echo "Checking TLS certificate/key match..."
 
           CERT_PUBLIC_KEY=$(
             openssl x509 \
               -in docker/nginx/ssl/server.crt \
               -pubkey \
               -noout |
-            openssl pkey -pubin -outform DER 2>/dev/null |
+            openssl pkey \
+              -pubin \
+              -outform DER |
             sha256sum |
             awk '{print $1}'
           )
@@ -961,15 +850,22 @@ jobs:
           KEY_PUBLIC_KEY=$(
             openssl pkey \
               -in docker/nginx/ssl/server.key \
-              -pubout 2>/dev/null |
-            openssl pkey -pubin -outform DER 2>/dev/null |
+              -pubout |
+            openssl pkey \
+              -pubin \
+              -outform DER |
             sha256sum |
             awk '{print $1}'
           )
 
+          if [ -z "$CERT_PUBLIC_KEY" ] ||
+             [ -z "$KEY_PUBLIC_KEY" ]; then
+            echo "ERROR: TLS fingerprints could not be calculated."
+            exit 1
+          fi
+
           if [ "$CERT_PUBLIC_KEY" != "$KEY_PUBLIC_KEY" ]; then
-            echo "ERROR: TLS certificate and private key do NOT match."
-            echo "Deployment stopped to prevent Nginx SSL failure."
+            echo "ERROR: TLS certificate and private key DO NOT MATCH."
             exit 1
           fi
 
@@ -980,24 +876,19 @@ jobs:
           # DOCKER HUB LOGIN
           # ======================================================
 
-          echo "=========================================="
-          echo "Docker Hub Login"
-          echo "=========================================="
+          echo "Logging into Docker Hub..."
 
-          echo "$DOCKERHUB_TOKEN" | docker login \
-            --username "$DOCKERHUB_USERNAME" \
-            --password-stdin
-
-          echo "Docker Hub authentication successful."
+          printf '%s' "$DOCKERHUB_TOKEN" |
+            docker login \
+              --username "$DOCKERHUB_USERNAME" \
+              --password-stdin
 
 
           # ======================================================
-          # CREATE DEPLOYMENT .ENV
+          # CREATE .ENV
           # ======================================================
 
-          echo "=========================================="
-          echo "Creating Deployment Environment"
-          echo "=========================================="
+          echo "Creating production .env..."
 
           umask 077
 
@@ -1010,64 +901,58 @@ EOF
 
           chmod 600 .env
 
-          echo "Deployment .env created."
-
 
           # ======================================================
-          # VALIDATE DOCKER COMPOSE
+          # VALIDATE COMPOSE
           # ======================================================
 
-          echo "=========================================="
-          echo "Validating Docker Compose"
-          echo "=========================================="
+          echo "Validating Docker Compose..."
 
           docker compose config -q
 
-          echo "Docker Compose configuration is valid."
-
 
           # ======================================================
-          # PULL NEW APPLICATION IMAGES
+          # PULL EXACT RELEASE
           # ======================================================
 
-          echo "=========================================="
-          echo "Pulling Backend Image"
-          echo "=========================================="
+          echo "Pulling backend image..."
 
           docker pull \
             "$DOCKERHUB_BACKEND:$IMAGE_TAG"
 
-
-          echo "=========================================="
-          echo "Pulling Frontend Image"
-          echo "=========================================="
+          echo "Pulling frontend image..."
 
           docker pull \
             "$DOCKERHUB_FRONTEND:$IMAGE_TAG"
 
 
           # ======================================================
-          # START POSTGRESQL
-          #
-          # IMPORTANT:
-          # Do NOT remove postgres_data.
-          # Existing database data is preserved.
+          # VERIFY IMAGES
           # ======================================================
 
-          echo "=========================================="
-          echo "Starting PostgreSQL"
-          echo "=========================================="
+          docker image inspect \
+            "$DOCKERHUB_BACKEND:$IMAGE_TAG" \
+            >/dev/null
+
+          docker image inspect \
+            "$DOCKERHUB_FRONTEND:$IMAGE_TAG" \
+            >/dev/null
+
+          echo "Application images verified."
+
+
+          # ======================================================
+          # START POSTGRES
+          # ======================================================
+
+          echo "Starting PostgreSQL..."
 
           docker compose up -d postgres
 
 
           # ======================================================
-          # WAIT FOR POSTGRESQL
+          # WAIT FOR POSTGRES
           # ======================================================
-
-          echo "=========================================="
-          echo "Waiting for PostgreSQL"
-          echo "=========================================="
 
           POSTGRES_READY=false
 
@@ -1079,37 +964,26 @@ EOF
               -d "$POSTGRES_DB" \
               >/dev/null 2>&1; then
 
-              echo "PostgreSQL is ready."
               POSTGRES_READY=true
+              echo "PostgreSQL is ready."
               break
-
             fi
 
-            echo "PostgreSQL not ready yet... attempt $i/30"
-
+            echo "PostgreSQL not ready... attempt $i/30"
             sleep 2
 
           done
 
           if [ "$POSTGRES_READY" != "true" ]; then
-
-            echo "ERROR: PostgreSQL did not become ready."
-
-            echo "PostgreSQL logs:"
+            echo "ERROR: PostgreSQL failed to become ready."
             docker compose logs postgres --tail=100 || true
-
             exit 1
-
           fi
 
 
           # ======================================================
-          # VERIFY DATABASE CONNECTION
+          # DATABASE CONNECTION TEST
           # ======================================================
-
-          echo "=========================================="
-          echo "Verifying Database Connection"
-          echo "=========================================="
 
           docker compose exec -T postgres \
             psql \
@@ -1117,20 +991,15 @@ EOF
             -d "$POSTGRES_DB" \
             -c "SELECT current_user, current_database();"
 
-          echo "Database connection successful."
-
 
           # ======================================================
-          # DATABASE MIGRATIONS
+          # DATABASE MIGRATION
           #
-          # flask db upgrade is SAFE to run repeatedly.
-          # Already-applied migrations are skipped.
-          # New migrations are applied automatically.
+          # IMPORTANT:
+          # Migration executes ON EC2 against production DB.
           # ======================================================
 
-          echo "=========================================="
-          echo "Running Database Migrations"
-          echo "=========================================="
+          echo "Running database migrations..."
 
           docker compose run \
             --rm \
@@ -1138,52 +1007,106 @@ EOF
             backend \
             flask db upgrade
 
-          echo "Database migration completed successfully."
+          echo "Database migration completed."
 
 
           # ======================================================
-          # START / UPDATE APPLICATION STACK
+          # REMOVE OLD APPLICATION CONTAINERS
+          #
+          # PostgreSQL is intentionally preserved.
           # ======================================================
 
-          echo "=========================================="
-          echo "Starting Production Stack"
-          echo "=========================================="
+          docker rm -f \
+            quantum-safe-backend \
+            quantum-safe-frontend \
+            quantum-safe-nginx \
+            quantum-safe-prometheus \
+            quantum-safe-grafana \
+            2>/dev/null || true
+
+
+          # ======================================================
+          # START COMPLETE STACK
+          # ======================================================
+
+          echo "Starting production stack..."
 
           docker compose up -d \
+            --force-recreate \
             --remove-orphans
 
-          echo "Production stack started."
+
+          # ======================================================
+          # WAIT FOR BACKEND
+          # ======================================================
+
+          BACKEND_READY=false
+
+          for i in {1..30}; do
+
+            if docker compose exec -T backend \
+              python -c \
+              "import socket; s=socket.create_connection(('127.0.0.1',5001),3); s.close()" \
+              >/dev/null 2>&1; then
+
+              BACKEND_READY=true
+              echo "Backend is ready."
+              break
+            fi
+
+            echo "Backend not ready... attempt $i/30"
+            sleep 2
+
+          done
+
+          if [ "$BACKEND_READY" != "true" ]; then
+            echo "ERROR: Backend failed to start."
+            docker compose ps
+            docker compose logs backend --tail=150 || true
+            exit 1
+          fi
 
 
           # ======================================================
-          # WAIT FOR CONTAINERS
+          # WAIT FOR NGINX
           # ======================================================
 
-          echo "=========================================="
-          echo "Waiting for Application Containers"
-          echo "=========================================="
+          NGINX_READY=false
 
-          sleep 10
+          for i in {1..30}; do
+
+            if docker compose exec -T nginx \
+              nginx -t \
+              >/dev/null 2>&1; then
+
+              NGINX_READY=true
+              echo "Nginx configuration is valid."
+              break
+            fi
+
+            echo "Nginx not ready... attempt $i/30"
+            sleep 2
+
+          done
+
+          if [ "$NGINX_READY" != "true" ]; then
+            echo "ERROR: Nginx failed."
+            docker compose ps
+            docker compose logs nginx --tail=150 || true
+            exit 1
+          fi
 
 
           # ======================================================
-          # CONTAINER STATUS
+          # FINAL NGINX TEST
           # ======================================================
 
-          echo "=========================================="
-          echo "Container Status"
-          echo "=========================================="
-
-          docker compose ps
+          docker compose exec -T nginx nginx -t
 
 
           # ======================================================
-          # VERIFY REQUIRED CONTAINERS
+          # VERIFY SERVICES
           # ======================================================
-
-          echo "=========================================="
-          echo "Verifying Required Containers"
-          echo "=========================================="
 
           REQUIRED_SERVICES=(
             postgres
@@ -1194,17 +1117,18 @@ EOF
             grafana
           )
 
+          FAILED=0
+
           for service in "${REQUIRED_SERVICES[@]}"; do
 
             CONTAINER_ID=$(
-              docker compose ps \
-                -q "$service" 2>/dev/null || true
+              docker compose ps -q "$service" 2>/dev/null || true
             )
 
             if [ -z "$CONTAINER_ID" ]; then
-              echo "ERROR: Service has no container: $service"
-              docker compose ps
-              exit 1
+              echo "ERROR: $service has no container."
+              FAILED=1
+              continue
             fi
 
             STATUS=$(
@@ -1215,138 +1139,74 @@ EOF
 
             if [ "$STATUS" != "running" ]; then
 
-              echo "ERROR: Service is not running: $service"
-              echo "Status: $STATUS"
-
+              echo "ERROR: $service is not running."
               docker compose logs \
                 --tail=100 \
                 "$service" || true
 
-              exit 1
-
+              FAILED=1
+            else
+              echo "$service: RUNNING"
             fi
-
-            echo "$service: running"
 
           done
 
-
-          # ======================================================
-          # NGINX CONFIGURATION TEST
-          # ======================================================
-
-          echo "=========================================="
-          echo "Testing Nginx Configuration"
-          echo "=========================================="
-
-          if ! docker compose exec -T nginx nginx -t; then
-
-            echo "ERROR: Nginx configuration test failed."
-
-            docker compose logs nginx --tail=100 || true
-
+          if [ "$FAILED" -ne 0 ]; then
+            echo "DEPLOYMENT FAILED."
+            docker compose ps
             exit 1
-
           fi
 
-          echo "Nginx configuration is valid."
-
 
           # ======================================================
-          # DATABASE VERIFICATION
+          # MIGRATION VERIFICATION
           # ======================================================
 
-          echo "=========================================="
-          echo "Database Verification"
-          echo "=========================================="
+          echo "Checking Alembic migration..."
 
           docker compose exec -T postgres \
             psql \
             -U "$POSTGRES_USER" \
             -d "$POSTGRES_DB" \
-            -c "SELECT current_user, current_database();"
+            -c "SELECT version_num FROM alembic_version;"
 
 
           # ======================================================
-          # MIGRATION VERSION
+          # BACKEND HEALTH CHECK
           # ======================================================
 
-          echo "=========================================="
-          echo "Migration Verification"
-          echo "=========================================="
+          if curl \
+            --silent \
+            --fail \
+            --max-time 10 \
+            http://127.0.0.1:5001/health \
+            >/dev/null 2>&1; then
 
-          docker compose exec -T postgres \
-            psql \
-            -U "$POSTGRES_USER" \
-            -d "$POSTGRES_DB" \
-            -c "SELECT version_num FROM alembic_version;" \
-            || echo "WARNING: alembic_version table not available."
+            echo "Backend /health: OK"
 
+          else
 
-          # ======================================================
-          # APPLICATION HEALTH CHECK
-          # ======================================================
-
-          echo "=========================================="
-          echo "Application Health Check"
-          echo "=========================================="
-
-          BACKEND_HEALTHY=false
-
-          for i in {1..15}; do
-
-            if curl \
-              --silent \
-              --fail \
-              --max-time 5 \
-              http://127.0.0.1:5001/health \
-              >/dev/null 2>&1; then
-
-              echo "Backend health check successful."
-              BACKEND_HEALTHY=true
-              break
-
-            fi
-
-            echo "Backend not ready yet... attempt $i/15"
-            sleep 2
-
-          done
-
-          if [ "$BACKEND_HEALTHY" != "true" ]; then
-
-            echo "WARNING: /health endpoint was not reachable."
-
-            echo "Backend logs:"
-            docker compose logs backend --tail=100 || true
+            echo "WARNING: /health endpoint unavailable."
+            echo "Backend container is running."
 
           fi
 
 
           # ======================================================
-          # FINAL STATUS
+          # CLEAN OLD IMAGES
           # ======================================================
-
-          echo "=========================================="
-          echo "Final Container Status"
-          echo "=========================================="
-
-          docker compose ps
-
-
-          # ======================================================
-          # CLEAN OLD UNUSED IMAGES
-          # ======================================================
-
-          echo "=========================================="
-          echo "Cleaning Unused Docker Images"
-          echo "=========================================="
 
           docker image prune -f
 
 
+          # ======================================================
+          # SUCCESS
+          # ======================================================
+
           echo "=========================================="
           echo "DEPLOYMENT COMPLETED SUCCESSFULLY"
           echo "=========================================="
+
+          docker compose ps
 
           REMOTE_SCRIPT
