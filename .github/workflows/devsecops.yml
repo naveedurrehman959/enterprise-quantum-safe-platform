@@ -529,7 +529,6 @@ jobs:
           docker push \
             ${{ env.DOCKERHUB_IMAGE_PREFIX }}-frontend:${{ github.sha }}
 
-
   # ============================================================
   # 14. DEPLOY TO AWS EC2
   # ============================================================
@@ -549,7 +548,7 @@ jobs:
     steps:
 
       # --------------------------------------------------------
-      # Validate EC2 secrets
+      # Validate EC2 configuration
       # --------------------------------------------------------
 
       - name: Validate EC2 Configuration
@@ -557,25 +556,49 @@ jobs:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          TLS_CERT: ${{ secrets.TLS_CERT }}
+          TLS_PRIVATE_KEY: ${{ secrets.TLS_PRIVATE_KEY }}
         run: |
-          set -e
+          set -euo pipefail
 
-          if [ -z "$EC2_HOST" ]; then
-            echo "ERROR: EC2_HOST secret is not configured."
-            exit 1
-          fi
+          echo "=========================================="
+          echo "VALIDATING DEPLOYMENT SECRETS"
+          echo "=========================================="
 
-          if [ -z "$EC2_USERNAME" ]; then
-            echo "ERROR: EC2_USERNAME secret is not configured."
-            exit 1
-          fi
+          REQUIRED_VARS=(
+            EC2_HOST
+            EC2_USERNAME
+            EC2_SSH_KEY
+            DOCKERHUB_USERNAME
+            DOCKERHUB_TOKEN
+            POSTGRES_DB
+            POSTGRES_USER
+            POSTGRES_PASSWORD
+            TLS_CERT
+            TLS_PRIVATE_KEY
+          )
 
-          if [ -z "$EC2_SSH_KEY" ]; then
-            echo "ERROR: EC2_SSH_KEY secret is not configured."
-            exit 1
-          fi
+          for var in "${REQUIRED_VARS[@]}"; do
+            if [ -z "${!var:-}" ]; then
+              echo "ERROR: Required secret is empty: $var"
+              exit 1
+            fi
+          done
 
-          echo "EC2 deployment configuration detected."
+          echo "All required deployment secrets are present."
+
+
+      # --------------------------------------------------------
+      # Checkout repository
+      # --------------------------------------------------------
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
 
       # --------------------------------------------------------
@@ -587,9 +610,11 @@ jobs:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
-          set -e
+          set -euo pipefail
 
-          echo "Configuring SSH..."
+          echo "=========================================="
+          echo "CONFIGURING SSH"
+          echo "=========================================="
 
           mkdir -p "$HOME/.ssh"
           chmod 700 "$HOME/.ssh"
@@ -597,16 +622,15 @@ jobs:
           printf '%s\n' "$EC2_SSH_KEY" > "$HOME/.ssh/deploy_key"
           chmod 600 "$HOME/.ssh/deploy_key"
 
-          echo "Checking SSH private key..."
+          if ! ssh-keygen -y \
+            -f "$HOME/.ssh/deploy_key" \
+            > /dev/null 2>&1; then
 
-          if ! ssh-keygen -y -f "$HOME/.ssh/deploy_key" > /dev/null 2>&1; then
-            echo "ERROR: EC2_SSH_KEY is not a valid SSH private key."
+            echo "ERROR: Invalid EC2 SSH private key."
             exit 1
           fi
 
-          echo "SSH private key format is valid."
-
-          echo "Scanning EC2 host..."
+          echo "SSH private key is valid."
 
           ssh-keyscan \
             -T 15 \
@@ -614,17 +638,206 @@ jobs:
             > "$HOME/.ssh/known_hosts"
 
           if [ ! -s "$HOME/.ssh/known_hosts" ]; then
-            echo "ERROR: ssh-keyscan returned no host key."
-            echo "Check EC2_HOST and that port 22 is reachable."
+            echo "ERROR: Could not obtain EC2 host key."
             exit 1
           fi
 
           chmod 644 "$HOME/.ssh/known_hosts"
 
-          echo "SSH configuration completed successfully."
+          echo "SSH configuration completed."
+
 
       # --------------------------------------------------------
-      # Deploy Application
+      # Prepare deployment directory
+      # --------------------------------------------------------
+
+      - name: Prepare EC2 Deployment Directory
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "PREPARING EC2 DEPLOYMENT DIRECTORY"
+          echo "=========================================="
+
+          ssh \
+            -i "$HOME/.ssh/deploy_key" \
+            -o StrictHostKeyChecking=yes \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            "$EC2_USERNAME@$EC2_HOST" \
+            'mkdir -p "$HOME/enterprise-quantum-safe-platform/docker/nginx/ssl" "$HOME/enterprise-quantum-safe-platform/monitoring/prometheus"'
+
+          echo "Deployment directories created."
+
+
+      # --------------------------------------------------------
+      # Copy Docker Compose file
+      # --------------------------------------------------------
+
+      - name: Copy Docker Compose File
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "COPYING DOCKER COMPOSE FILE"
+          echo "=========================================="
+
+          scp \
+            -i "$HOME/.ssh/deploy_key" \
+            -o StrictHostKeyChecking=yes \
+            -o BatchMode=yes \
+            docker-compose.yml \
+            "$EC2_USERNAME@$EC2_HOST:$HOME/enterprise-quantum-safe-platform/docker-compose.yml"
+
+          echo "docker-compose.yml copied successfully."
+
+
+      # --------------------------------------------------------
+      # Copy Nginx configuration
+      # --------------------------------------------------------
+
+      - name: Copy Nginx Configuration
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "COPYING NGINX CONFIGURATION"
+          echo "=========================================="
+
+          scp \
+            -i "$HOME/.ssh/deploy_key" \
+            -o StrictHostKeyChecking=yes \
+            -o BatchMode=yes \
+            docker/nginx/default.conf \
+            "$EC2_USERNAME@$EC2_HOST:$HOME/enterprise-quantum-safe-platform/docker/nginx/default.conf"
+
+          echo "Nginx configuration copied successfully."
+
+
+      # --------------------------------------------------------
+      # Copy Prometheus configuration
+      # --------------------------------------------------------
+
+      - name: Copy Prometheus Configuration
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "COPYING PROMETHEUS CONFIGURATION"
+          echo "=========================================="
+
+          scp \
+            -i "$HOME/.ssh/deploy_key" \
+            -o StrictHostKeyChecking=yes \
+            -o BatchMode=yes \
+            monitoring/prometheus/prometheus.yml \
+            "$EC2_USERNAME@$EC2_HOST:$HOME/enterprise-quantum-safe-platform/monitoring/prometheus/prometheus.yml"
+
+          echo "Prometheus configuration copied successfully."
+
+
+      # --------------------------------------------------------
+      # Create deployment environment and TLS files
+      # --------------------------------------------------------
+
+      - name: Configure EC2 Environment
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
+
+          IMAGE_TAG: ${{ github.sha }}
+
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+
+          TLS_CERT: ${{ secrets.TLS_CERT }}
+          TLS_PRIVATE_KEY: ${{ secrets.TLS_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "CONFIGURING EC2 ENVIRONMENT"
+          echo "=========================================="
+
+          ssh \
+            -i "$HOME/.ssh/deploy_key" \
+            -o StrictHostKeyChecking=yes \
+            -o BatchMode=yes \
+            "$EC2_USERNAME@$EC2_HOST" \
+            "IMAGE_TAG='$IMAGE_TAG' \
+             DOCKERHUB_USERNAME='$DOCKERHUB_USERNAME' \
+             DOCKERHUB_TOKEN='$DOCKERHUB_TOKEN' \
+             POSTGRES_DB='$POSTGRES_DB' \
+             POSTGRES_USER='$POSTGRES_USER' \
+             POSTGRES_PASSWORD='$POSTGRES_PASSWORD' \
+             TLS_CERT='$TLS_CERT' \
+             TLS_PRIVATE_KEY='$TLS_PRIVATE_KEY' \
+             bash -s" <<'REMOTE_SCRIPT'
+
+          set -euo pipefail
+
+          DEPLOY_DIR="$HOME/enterprise-quantum-safe-platform"
+
+          cd "$DEPLOY_DIR"
+
+          echo "Deployment directory:"
+          pwd
+
+          # ------------------------------------------------------
+          # Create .env safely
+          # ------------------------------------------------------
+
+          umask 077
+
+          printf '%s\n' \
+            "IMAGE_TAG=$IMAGE_TAG" \
+            "POSTGRES_DB=$POSTGRES_DB" \
+            "POSTGRES_USER=$POSTGRES_USER" \
+            "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" \
+            > .env
+
+          chmod 600 .env
+
+          echo ".env created successfully."
+
+          # ------------------------------------------------------
+          # Create TLS files
+          # ------------------------------------------------------
+
+          mkdir -p docker/nginx/ssl
+
+          printf '%s\n' "$TLS_CERT" \
+            > docker/nginx/ssl/server.crt
+
+          printf '%s\n' "$TLS_PRIVATE_KEY" \
+            > docker/nginx/ssl/server.key
+
+          chmod 644 docker/nginx/ssl/server.crt
+          chmod 600 docker/nginx/ssl/server.key
+
+          echo "TLS files created successfully."
+
+          REMOTE_SCRIPT
+
+
+      # --------------------------------------------------------
+      # Deploy complete application
       # --------------------------------------------------------
 
       - name: Deploy Application
@@ -634,200 +847,381 @@ jobs:
 
           IMAGE_TAG: ${{ github.sha }}
 
-          GHCR_BACKEND: ghcr.io/naveedurrehman959/enterprise-quantum-safe-platform-backend
-          GHCR_FRONTEND: ghcr.io/naveedurrehman959/enterprise-quantum-safe-platform-frontend
-
-          GHCR_USERNAME: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
         run: |
-          set -e
+          set -euo pipefail
 
           echo "=========================================="
-          echo "Quantum-Safe Platform Deployment"
+          echo "DEPLOYING QUANTUM-SAFE PLATFORM"
           echo "=========================================="
 
           ssh \
             -i "$HOME/.ssh/deploy_key" \
             -o StrictHostKeyChecking=yes \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
             "$EC2_USERNAME@$EC2_HOST" \
-            "GHCR_BACKEND='$GHCR_BACKEND' \
-             GHCR_FRONTEND='$GHCR_FRONTEND' \
-             IMAGE_TAG='$IMAGE_TAG' \
-             GHCR_USERNAME='$GHCR_USERNAME' \
-             GHCR_TOKEN='$GHCR_TOKEN' \
+            "IMAGE_TAG='$IMAGE_TAG' \
+             DOCKERHUB_USERNAME='$DOCKERHUB_USERNAME' \
+             DOCKERHUB_TOKEN='$DOCKERHUB_TOKEN' \
              bash -s" <<'REMOTE_SCRIPT'
 
-          set -e
+          set -euo pipefail
+
+          DEPLOY_DIR="$HOME/enterprise-quantum-safe-platform"
+
+          cd "$DEPLOY_DIR"
 
           echo "=========================================="
-          echo "Logging into GHCR"
+          echo "DEPLOYMENT DIRECTORY"
           echo "=========================================="
 
-          echo "$GHCR_TOKEN" | docker login ghcr.io \
-            -u "$GHCR_USERNAME" \
+          pwd
+
+
+          # ======================================================
+          # VERIFY DOCKER
+          # ======================================================
+
+          echo "=========================================="
+          echo "VERIFYING DOCKER"
+          echo "=========================================="
+
+          docker --version
+          docker compose version
+
+
+          # ======================================================
+          # VERIFY REQUIRED FILES
+          # ======================================================
+
+          echo "=========================================="
+          echo "VERIFYING DEPLOYMENT FILES"
+          echo "=========================================="
+
+          REQUIRED_FILES=(
+            "docker-compose.yml"
+            "docker/nginx/default.conf"
+            "docker/nginx/ssl/server.crt"
+            "docker/nginx/ssl/server.key"
+            "monitoring/prometheus/prometheus.yml"
+            ".env"
+          )
+
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "ERROR: Missing file: $file"
+              exit 1
+            fi
+          done
+
+          echo "All deployment files are present."
+
+
+          # ======================================================
+          # DOCKER HUB LOGIN
+          # ======================================================
+
+          echo "=========================================="
+          echo "LOGGING INTO DOCKER HUB"
+          echo "=========================================="
+
+          printf '%s\n' "$DOCKERHUB_TOKEN" | docker login \
+            --username "$DOCKERHUB_USERNAME" \
             --password-stdin
 
+          echo "Docker Hub login successful."
+
+
+          # ======================================================
+          # VALIDATE TLS
+          # ======================================================
 
           echo "=========================================="
-          echo "Pulling backend image"
+          echo "VALIDATING TLS"
           echo "=========================================="
 
-          docker pull \
-            "$GHCR_BACKEND:$IMAGE_TAG"
+          openssl x509 \
+            -in docker/nginx/ssl/server.crt \
+            -noout \
+            -subject \
+            -issuer \
+            -dates
+
+          openssl pkey \
+            -in docker/nginx/ssl/server.key \
+            -noout
+
+          CERT_KEY_HASH=$(
+            openssl x509 \
+              -in docker/nginx/ssl/server.crt \
+              -pubkey \
+              -noout |
+            openssl pkey \
+              -pubin \
+              -outform DER 2>/dev/null |
+            sha256sum |
+            awk '{print $1}'
+          )
+
+          PRIVATE_KEY_HASH=$(
+            openssl pkey \
+              -in docker/nginx/ssl/server.key \
+              -pubout 2>/dev/null |
+            openssl pkey \
+              -pubin \
+              -outform DER 2>/dev/null |
+            sha256sum |
+            awk '{print $1}'
+          )
+
+          if [ "$CERT_KEY_HASH" != "$PRIVATE_KEY_HASH" ]; then
+            echo "ERROR: TLS certificate and private key do not match."
+            exit 1
+          fi
+
+          echo "TLS certificate and private key match."
 
 
-          echo "=========================================="
-          echo "Pulling frontend image"
-          echo "=========================================="
-
-          docker pull \
-            "$GHCR_FRONTEND:$IMAGE_TAG"
-
-
-          echo "=========================================="
-          echo "Creating Docker network"
-          echo "=========================================="
-
-          docker network create quantum-safe-network 2>/dev/null || true
-
-          echo "Docker network:"
-          docker network inspect quantum-safe-network \
-            --format='{{.Name}}'
-
-
-          echo "=========================================="
-          echo "Stopping previous containers"
-          echo "=========================================="
-
-          docker rm -f quantum-safe-backend 2>/dev/null || true
-          docker rm -f quantum-safe-frontend 2>/dev/null || true
-
-
-          echo "=========================================="
-          echo "Starting backend"
-          echo "=========================================="
-
-          docker run -d \
-            --name quantum-safe-backend \
-            --restart unless-stopped \
-            --network quantum-safe-network \
-            -p 5001:5001 \
-            "$GHCR_BACKEND:$IMAGE_TAG"
-
-
-          echo "=========================================="
-          echo "Starting frontend"
-          echo "=========================================="
-
-          docker run -d \
-            --name quantum-safe-frontend \
-            --restart unless-stopped \
-            --network quantum-safe-network \
-            -p 80:80 \
-            "$GHCR_FRONTEND:$IMAGE_TAG"
-
+          # ======================================================
+          # VALIDATE COMPOSE
+          # ======================================================
 
           echo "=========================================="
-          echo "Containers started"
+          echo "VALIDATING DOCKER COMPOSE"
           echo "=========================================="
 
-          echo "Waiting for containers..."
+          docker compose config -q
+
+          echo "Docker Compose configuration is valid."
+
+
+          # ======================================================
+          # PULL IMAGES
+          # ======================================================
+
+          echo "=========================================="
+          echo "PULLING APPLICATION IMAGES"
+          echo "=========================================="
+
+          docker compose pull
+
+          echo "Docker images pulled successfully."
+
+
+          # ======================================================
+          # START POSTGRESQL
+          # ======================================================
+
+          echo "=========================================="
+          echo "STARTING POSTGRESQL"
+          echo "=========================================="
+
+          docker compose up -d postgres
+
+
+          # ======================================================
+          # WAIT FOR POSTGRESQL
+          # ======================================================
+
+          echo "=========================================="
+          echo "WAITING FOR POSTGRESQL"
+          echo "=========================================="
+
+          POSTGRES_READY=false
+
+          for i in {1..30}; do
+
+            if docker compose exec -T postgres \
+              pg_isready \
+              -U "$POSTGRES_USER" \
+              -d "$POSTGRES_DB" \
+              >/dev/null 2>&1; then
+
+              echo "PostgreSQL is ready."
+
+              POSTGRES_READY=true
+
+              break
+
+            fi
+
+            echo "PostgreSQL not ready yet... attempt $i/30"
+
+            sleep 2
+
+          done
+
+          if [ "$POSTGRES_READY" != "true" ]; then
+
+            echo "ERROR: PostgreSQL failed to become ready."
+
+            docker compose ps -a
+
+            docker compose logs postgres --tail=150 || true
+
+            exit 1
+
+          fi
+
+
+          # ======================================================
+          # START COMPLETE STACK
+          # ======================================================
+
+          echo "=========================================="
+          echo "STARTING COMPLETE APPLICATION STACK"
+          echo "=========================================="
+
+          docker compose up -d --remove-orphans
+
+          echo "Complete stack started."
+
+
+          # ======================================================
+          # WAIT FOR APPLICATION
+          # ======================================================
+
+          echo "=========================================="
+          echo "WAITING FOR APPLICATION"
+          echo "=========================================="
+
           sleep 15
 
 
-          echo "=========================================="
-          echo "Checking container status"
-          echo "=========================================="
-
-          BACKEND_STATUS=$(docker inspect \
-            --format='{{.State.Status}}' \
-            quantum-safe-backend)
-
-          FRONTEND_STATUS=$(docker inspect \
-            --format='{{.State.Status}}' \
-            quantum-safe-frontend)
-
-
-          echo "Backend:  $BACKEND_STATUS"
-          echo "Frontend: $FRONTEND_STATUS"
-
-
-          if [ "$BACKEND_STATUS" != "running" ]; then
-
-            echo "ERROR: Backend container is not running."
-
-            docker logs --tail 100 quantum-safe-backend
-
-            exit 1
-
-          fi
-
-
-          if [ "$FRONTEND_STATUS" != "running" ]; then
-
-            echo "ERROR: Frontend container is not running."
-
-            docker logs --tail 100 quantum-safe-frontend
-
-            exit 1
-
-          fi
-
+          # ======================================================
+          # DATABASE MIGRATION
+          # ======================================================
 
           echo "=========================================="
-          echo "Testing Docker DNS"
+          echo "RUNNING DATABASE MIGRATION"
           echo "=========================================="
 
-          docker exec quantum-safe-frontend \
-            getent hosts quantum-safe-backend || {
+          docker compose exec -T backend \
+            flask db upgrade
 
-              echo "ERROR: Frontend cannot resolve backend hostname."
+          echo "Database migration completed successfully."
 
-              docker network inspect quantum-safe-network
+
+          # ======================================================
+          # VERIFY SERVICES
+          # ======================================================
+
+          echo "=========================================="
+          echo "VERIFYING SERVICES"
+          echo "=========================================="
+
+          REQUIRED_SERVICES=(
+            postgres
+            backend
+            frontend
+            nginx
+            prometheus
+            grafana
+          )
+
+          for service in "${REQUIRED_SERVICES[@]}"; do
+
+            CONTAINER_ID=$(
+              docker compose ps -q "$service" 2>/dev/null || true
+            )
+
+            if [ -z "$CONTAINER_ID" ]; then
+
+              echo "ERROR: No container exists for service: $service"
+
+              docker compose ps -a
 
               exit 1
-          }
 
+            fi
 
-          echo "Backend hostname resolved successfully."
+            STATUS=$(
+              docker inspect \
+                --format '{{.State.Status}}' \
+                "$CONTAINER_ID"
+            )
 
+            if [ "$STATUS" != "running" ]; then
 
-          echo "=========================================="
-          echo "Testing Backend Connectivity"
-          echo "=========================================="
+              echo "ERROR: Service is not running: $service"
+              echo "Current status: $STATUS"
 
-          docker exec quantum-safe-frontend \
-            wget -qO- http://quantum-safe-backend:5001/health || {
-
-              echo "WARNING: Backend health endpoint did not respond."
-
-              echo "Backend logs:"
-              docker logs --tail 100 quantum-safe-backend
+              docker compose logs \
+                --tail=150 \
+                "$service" || true
 
               exit 1
-          }
+
+            fi
+
+            echo "$service: RUNNING"
+
+          done
 
 
-          echo "Backend is reachable from frontend."
-
-
-          echo "=========================================="
-          echo "Deployment Health Check PASSED"
-          echo "=========================================="
-
-
-          docker ps \
-            --filter "name=quantum-safe-backend" \
-            --filter "name=quantum-safe-frontend"
-
+          # ======================================================
+          # NGINX TEST
+          # ======================================================
 
           echo "=========================================="
-          echo "Network Configuration"
+          echo "TESTING NGINX"
           echo "=========================================="
 
-          docker network inspect quantum-safe-network \
-            --format='{{range .Containers}}{{.Name}} {{end}}'
+          docker compose exec -T nginx nginx -t
 
+          echo "Nginx configuration is valid."
+
+
+          # ======================================================
+          # DATABASE TEST
+          # ======================================================
+
+          echo "=========================================="
+          echo "TESTING DATABASE"
+          echo "=========================================="
+
+          docker compose exec -T postgres \
+            psql \
+            -U "$POSTGRES_USER" \
+            -d "$POSTGRES_DB" \
+            -c "SELECT current_user, current_database();"
+
+
+          # ======================================================
+          # ALEMBIC VERSION
+          # ======================================================
+
+          echo "=========================================="
+          echo "CHECKING DATABASE MIGRATION"
+          echo "=========================================="
+
+          docker compose exec -T postgres \
+            psql \
+            -U "$POSTGRES_USER" \
+            -d "$POSTGRES_DB" \
+            -c "SELECT version_num FROM alembic_version;"
+
+
+          # ======================================================
+          # FINAL STATUS
+          # ======================================================
+
+          echo "=========================================="
+          echo "FINAL DOCKER COMPOSE STATUS"
+          echo "=========================================="
+
+          docker compose ps
+
+
+          # ======================================================
+          # SUCCESS
+          # ======================================================
+
+          echo "=========================================="
+          echo "DEPLOYMENT COMPLETED SUCCESSFULLY"
+          echo "=========================================="
 
           REMOTE_SCRIPT
